@@ -170,16 +170,8 @@ class MeetingStatusResponse(BaseModel):
 # REPORT GENERATION SCHEMAS
 # ============================================================================
 
-class ReportFormat(str):
-    """Report output format."""
-    MARKDOWN = "markdown"
-
 class ReportGenerateRequest(BaseModel):
-    """Request schema for generating meeting report."""
-    format: str = Field(
-        ReportFormat.MARKDOWN,
-        description="Output format: markdown, pdf, or json"
-    )
+    """Request schema for generating meeting report in Markdown format."""
     include_transcription: bool = Field(
         True,
         description="Include full transcription in report"
@@ -191,16 +183,11 @@ class ReportGenerateRequest(BaseModel):
 
 
 class ReportResponse(BaseModel):
-    """Response schema for generated report."""
+    """Response schema for generated Markdown report"""
     meeting_id: int
-    format: str
-    file_url: Optional[str] = Field(
-        None,
-        description="Download URL for PDF reports"
-    )
-    content: Optional[str] = Field(
-        None,
-        description="Report content for markdown/json"
+    content: str = Field(
+        ...,
+        description="Report content in Markdown format"
     )
     generated_at: datetime
 

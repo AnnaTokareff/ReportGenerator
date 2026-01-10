@@ -11,6 +11,7 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     tokens = relationship("APIToken", back_populates="user")
+    meetings = relationship("Meeting", back_populates="user")
 
 
 class APIToken(Base):

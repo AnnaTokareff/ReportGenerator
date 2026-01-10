@@ -1,202 +1,216 @@
-# FastAPI Template
+# Meeting Reporter - Report Generator + Support Agent
 
-A production-ready FastAPI template with authentication, async database operations, and Docker support.
+A FastAPI application for generating meeting reports from audio files, similar to Noota. The tool can receive audio files via API and generate transcriptions, structured summaries, decisions, and action items. Includes a simple support agent that can answer questions based on meeting transcriptions.
 
 ## Features
 
-- **Modern Python**: Type hints, async/await syntax, and the latest FastAPI features
-- **JWT Authentication**: Complete authentication system with access and refresh tokens
-- **SQLAlchemy with Async**: Fully async database operations using SQLAlchemy 2.0+
-- **Alembic Migrations**: Database schema migrations with Alembic
-- **Role-based Access Control**: User roles with different permission levels (active, staff, superuser)
-- **Docker Support**: Ready-to-use Docker and Docker Compose configurations
-- **Developer-friendly**: Auto-reload, debugging, and development tools
-- **Production-ready**: Configuration for deployment in production environments
+- **Audio Transcription**: Convert audio files to text using OpenAI Whisper
+- **Meeting Analysis**: Extract topics, decisions, and action items using GPT
+- **Report Generation**: Generate structured Markdown reports
+- **Support Agent**: Simple agent that answers questions based on meeting transcriptions
+- **JWT Authentication**: Secure user authentication
+- **Async Database**: SQLAlchemy with async operations
+- **Docker Support**: Ready-to-use Docker configurations
 
-## Project Structure
+## Quick Start
 
-```
-.
-├── alembic/                 # Database migrations
-├── app/                     # Main application package
-│   ├── api/                 # API endpoints
-│   ├── core/                # Core functionality (config, security)
-│   ├── db/                  # Database session and base
-│   ├── models/              # SQLAlchemy models
-│   ├── schemas/             # Pydantic schemas
-│   ├── services/            # Business logic
-│   └── utils/               # Utility functions
-├── docker-compose.yml       # Docker Compose for production
-├── docker-compose.dev.yml   # Docker Compose for development
-├── Dockerfile               # Docker configuration
-├── alambic.ini              # Alembic configuration
-├── main.py                  # Application entry point
-├── pyproject.toml           # Project dependencies and metadata
-├── start.sh                 # Production startup script
-└── start-dev.sh             # Development startup script
-```
-
-## Requirements
+### Prerequisites
 
 - Python 3.11+
-- Docker (optional)
+- OpenAI API key ([Get one here](https://platform.openai.com/api-keys))
 
-## Installation
+### Installation
 
-### Using Docker (recommended)
-
-1. Clone the repository:
+1. **Clone and setup environment:**
    ```bash
-   git clone <your-repo-url>
-   cd fastapi-template
-   ```
-
-2. Start the application with Docker Compose:
-   ```bash
-   # For development
-   docker-compose -f docker-compose.dev.yml up --build
-
-   # For production
-   docker-compose up --build
-   ```
-
-3. The API will be available at http://localhost:8000
-
-### Local Development
-
-1. Clone the repository:
-   ```bash
-   git clone <your-repo-url>
-   cd fastapi-template
-   ```
-
-2. Create and activate a virtual environment:
-   ```bash
+   cd meeting_reporter
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
-3. Install dependencies:
+2. **Install dependencies:**
    ```bash
    pip install -e ".[dev]"
    ```
 
-4. Set up environment variables (create a `.env` file):
-   ```
+3. **Create `.env` file:**
+   ```env
    DEBUG=true
-   SECRET_KEY=your-secret-key
-   DB_ENGINE=sqlite  # or postgresql
-   # For PostgreSQL, add these:
-   # DB_USER=postgres
-   # DB_PASSWORD=password
-   # DB_HOST=localhost
-   # DB_PORT=5432
-   # DB_NAME=app
+   SECRET_KEY=your-secret-key-here
+   DB_ENGINE=sqlite
+   DB_NAME=app.db
+   OPENAI_API_KEY=sk-your-openai-api-key
    ```
 
-5. Run migrations:
+4. **Run migrations:**
    ```bash
    alembic upgrade head
    ```
 
-6. Start the application:
+5. **Start the server:**
    ```bash
    uvicorn main:app --reload
    ```
 
-7. The API will be available at http://localhost:8000
-
-## API Documentation
-
-Once the application is running, you can access:
-
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+6. **Access API documentation:**
+   - Swagger UI: http://localhost:8000/docs
+   - ReDoc: http://localhost:8000/redoc
 
 ## API Endpoints
 
 ### Authentication
+- `POST /auth/signup` - Register new user
+- `POST /auth/login` - Login and get access token
 
-- `POST /auth/signup` - Register a new user
-- `POST /auth/login` - Authenticate and get tokens
-- `POST /auth/token/refresh` - Refresh access token
-- `POST /auth/logout` - Logout user
-- `GET /auth/me` - Get current user information
+### Meetings
+- `POST /meetings/upload` - Upload audio file and create meeting
+- `GET /meetings` - List all user's meetings
+- `GET /meetings/{id}` - Get meeting details
+- `GET /meetings/{id}/status` - Check processing status
+- `POST /meetings/{id}/report` - Generate Markdown report
+- `DELETE /meetings/{id}` - Delete meeting
+
+### Support Agent (with Semantic Search)
+- `POST /support/query` - Ask a question using semantic search (CPU-based, no GPU needed)
+- `GET /support/meetings` - List meetings available for search
 
 ### System
+- `GET /health` - Health check
 
-- `GET /health` - Health check endpoint
+## Usage Example
+
+### 1. Register and Login
+```bash
+# Register
+curl -X POST "http://localhost:8000/auth/signup" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "user", "password": "pass123"}'
+
+# Login (save the access_token)
+curl -X POST "http://localhost:8000/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "user", "password": "pass123"}'
+```
+
+### 2. Upload Audio File
+```bash
+curl -X POST "http://localhost:8000/meetings/upload" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -F "title=Team Meeting" \
+  -F "language=en" \
+  -F "file=@meeting.mp3"
+```
+
+### 3. Check Status
+```bash
+curl -X GET "http://localhost:8000/meetings/1/status" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### 4. Generate Report (Markdown only)
+```bash
+curl -X POST "http://localhost:8000/meetings/1/report" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"include_transcription": true, "include_timestamps": false}'
+```
+
+**Note:** Reports are generated only in Markdown format. PDF and JSON formats are not supported.
+
+### 5. Query Support Agent
+```bash
+curl -X POST "http://localhost:8000/support/query" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What decisions were made about the budget?"}'
+```
+
+## Project Structure
+
+```
+meeting_reporter/
+├── app/
+│   ├── api/              # API endpoints
+│   │   ├── auth.py       # Authentication
+│   │   ├── meetings_api.py  # Meeting management
+│   │   └── support_api.py   # Support agent
+│   ├── core/             # Configuration and security
+│   ├── db/               # Database session management
+│   ├── models/           # SQLAlchemy models
+│   ├── schemas/          # Pydantic schemas
+│   ├── services/         # Business logic
+│   │   ├── audio/        # Transcription service
+│   │   ├── llm/          # Analysis service
+│   │   └── analysis/     # Report generation
+│   └── utils/            # Utilities
+├── alembic/              # Database migrations
+├── main.py               # Application entry point
+└── .env                  # Environment variables
+```
 
 ## Configuration
 
-The application is configured through environment variables which can be set in a `.env` file:
+Environment variables (`.env` file):
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DEBUG` | Enable debug mode | `true` |
-| `SECRET_KEY` | JWT secret key | `supersecretkey` |
-| `ALGORITHM` | JWT algorithm | `HS256` |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token expiration time | `60` |
-| `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh token expiration time | `7` |
-| `CORS_ORIGINS` | CORS allowed origins | `["*"]` |
+| `DEBUG` | Debug mode | `true` |
+| `SECRET_KEY` | JWT secret key | Required |
+| `OPENAI_API_KEY` | OpenAI API key | Required |
 | `DB_ENGINE` | Database engine | `sqlite` |
-| `DB_USER` | Database user | `""` |
-| `DB_PASSWORD` | Database password | `""` |
-| `DB_HOST` | Database host | `""` |
-| `DB_PORT` | Database port | `""` |
 | `DB_NAME` | Database name | `app.db` |
 
-## Development
-
-### Running Tests
-
-```bash
-pytest
+For PostgreSQL:
 ```
-
-### Code Quality Tools
-
-The project uses several tools to ensure code quality:
-
-- **Black**: Code formatter
-- **isort**: Import sorter
-- **mypy**: Static type checking
-- **pre-commit**: Git hooks for code quality checks
-
-To set up pre-commit hooks:
-
-```bash
-pre-commit install
-```
-
-## Database
-
-The template supports SQLite for development and PostgreSQL for production. The default is SQLite.
-
-### Migrations
-
-To create a new migration after changing models:
-
-```bash
-alembic revision --autogenerate -m "Description of changes"
-```
-
-To apply migrations:
-
-```bash
-alembic upgrade head
+DB_ENGINE=postgresql
+DB_USER=postgres
+DB_PASSWORD=password
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=meeting_reporter
 ```
 
 ## Docker
 
-The project includes Docker configurations for both development and production:
+### Development
+```bash
+docker-compose -f docker-compose.dev.yml up --build
+```
 
-- `docker-compose.yml`: Production setup
-- `docker-compose.dev.yml`: Development setup with hot-reload
+### Production
+```bash
+docker-compose up --build
+```
 
-## Contributing
+## Database Migrations
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b ft/my-feature`
-3. Commit your changes: `git commit -m 'Add my feature'`
-4. Push to the branch: `git push origin ft/my-feature`
+Create new migration:
+```bash
+alembic revision --autogenerate -m "Description"
+```
+
+Apply migrations:
+```bash
+alembic upgrade head
+```
+
+## Testing
+
+```bash
+pytest
+pytest --cov=app
+```
+
+## Documentation
+
+For detailed documentation in Russian, see [README_RU.md](README_RU.md)
+
+## Requirements
+
+- Python 3.11+
+- OpenAI API key
+- (Optional) Docker and Docker Compose
+
+## License
+
+MIT

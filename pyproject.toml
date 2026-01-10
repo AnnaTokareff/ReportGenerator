@@ -26,6 +26,10 @@ dependencies = [
     "python-multipart>=0.0.9", # For form data handling
     "email-validator>=2.1.1",
     "python-dotenv>=1.0.1",
+    "openai>=1.0.0", # For Whisper transcription and GPT analysis
+    "pydub>=0.25.0", # For audio file processing
+    "sentence-transformers>=2.2.0", # For semantic search (CPU-based, no GPU needed)
+    "numpy>=1.24.0", # For vector operations
 ]
 
 [tool.hatch.build.targets.wheel]

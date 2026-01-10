@@ -59,7 +59,7 @@ class Meeting(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     
     # Audio file information
-    audio_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    audio_file_path: Mapped[str] = mapped_column(String(500), nullable=False)
     audio_duration: Mapped[float | None] = mapped_column(Float, nullable=True)  # in seconds
     audio_format: Mapped[str | None] = mapped_column(String(20), nullable=True)  # mp3, wav, etc.
     
