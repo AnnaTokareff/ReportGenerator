@@ -20,6 +20,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import FileResponse
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -101,11 +102,9 @@ async def process_meeting_transcript(meet_id: int, audio_path: str, lang: str | 
                 lang=transcription_result["language"]
             )
             
-            # Save summary
             if analysis_result.get("summary"):
                 transcription.summary = analysis_result["summary"]
             
-            # Save topics
             for topic_data in analysis_result.get("topics", []):
                 topic = MeetingTopic(
                     meeting_id=meet_id,
@@ -114,7 +113,6 @@ async def process_meeting_transcript(meet_id: int, audio_path: str, lang: str | 
                 )
                 db.add(topic)
             
-            # Save decisions
             for decision_data in analysis_result.get("decisions", []):
                 decision = Decision(
                     meeting_id=meet_id,
@@ -124,12 +122,10 @@ async def process_meeting_transcript(meet_id: int, audio_path: str, lang: str | 
                 )
                 db.add(decision)
             
-            # Save action items
             from app.models.meeting_models import ActionItemPriority, ActionItemStatus
             from datetime import datetime as dt
             
             for item_data in analysis_result.get("action_items", []):
-                # Parse due date
                 due_date = None
                 if item_data.get("due_date"):
                     try:
@@ -137,7 +133,6 @@ async def process_meeting_transcript(meet_id: int, audio_path: str, lang: str | 
                     except (ValueError, TypeError):
                         pass
                 
-                # Parse priority
                 priority_map = {
                     "low": ActionItemPriority.LOW,
                     "medium": ActionItemPriority.MEDIUM,
@@ -157,7 +152,6 @@ async def process_meeting_transcript(meet_id: int, audio_path: str, lang: str | 
                 )
                 db.add(action_item)
             
-            # Step 4: Mark as completed
             meet.status = MeetingStatus.COMPLETED
             meet.language = transcription_result["language"]
             await db.commit()
@@ -315,23 +309,65 @@ async def get_meeting(
     Returns:
         full meeting data
     """
-    result = await db.execute(select(Meeting).options(
-            selectinload(Meeting.transcription),
-            selectinload(Meeting.topics),
-            selectinload(Meeting.decisions),
-            selectinload(Meeting.action_items)
-        ).where(Meeting.id == meeting_id, Meeting.user_id == current_user.id)
-    )
-    
-    meeting = result.scalar_one_or_none()
-    
-    if not meeting:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Meeting not found"
+    try:
+        result = await db.execute(select(Meeting).options(
+                selectinload(Meeting.transcription),
+                selectinload(Meeting.topics),
+                selectinload(Meeting.decisions),
+                selectinload(Meeting.action_items)
+            ).where(Meeting.id == meeting_id, Meeting.user_id == current_user.id)
         )
-    
-    return MeetingResponse.model_validate(meeting)
+        
+        meeting = result.scalar_one_or_none()
+        
+        if not meeting:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Meeting not found"
+            )
+        
+        # Normalize JSON fields before validation to avoid serialization issues
+        # Fix participants if it's stored incorrectly
+        if meeting.decisions:
+            for decision in meeting.decisions:
+                if decision.participants is not None:
+                    # Ensure participants is a list, not dict
+                    if isinstance(decision.participants, dict):
+                        # If it's a dict, try to convert (shouldn't happen, but just in case)
+                        decision.participants = list(decision.participants.values()) if decision.participants else None
+                    elif not isinstance(decision.participants, list):
+                        decision.participants = None
+        
+        # Ensure segments is properly formatted (can be list or dict)
+        if meeting.transcription and meeting.transcription.segments is not None:
+            # SQLAlchemy JSON field should already deserialize it, but ensure it's valid
+            if not isinstance(meeting.transcription.segments, (list, dict)):
+                meeting.transcription.segments = None
+        
+        # Validate and return meeting data
+        try:
+            return MeetingResponse.model_validate(meeting)
+        except Exception as validation_error:
+            # Log validation error details
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Validation error for meeting {meeting_id}: {error_details}")
+            print(f"Meeting data: id={meeting.id}, status={meeting.status}, has_transcription={meeting.transcription is not None}")
+            if meeting.transcription:
+                print(f"Transcription: language={meeting.transcription.language}, segments_type={type(meeting.transcription.segments)}")
+            raise
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        # Log the full error for debugging
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error getting meeting {meeting_id}: {error_details}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get meeting details: {str(e)}"
+        )
 
 
 @router.get("/{meeting_id}/status", response_model=MeetingStatusResponse)
@@ -416,9 +452,6 @@ async def delete_meeting(
     # Delete audio file
     audio_path = meeting.audio_file_path
     
-    # Delete from database (cascades to related records)
-    # In SQLAlchemy 2.0 async, use execute with delete statement
-    # Defense-in-depth: verify user_id in delete statement as well
     await db.execute(
         delete(Meeting).where(
             Meeting.id == meeting_id,
@@ -427,12 +460,20 @@ async def delete_meeting(
     )
     await db.commit()
     
-    # Delete file from disk
+    # Delete files from disk
     try:
         delete_audio_file(audio_path)
     except Exception as e:
         # Log error but don't fail the request
         print(f"Warning: Failed to delete audio file {audio_path}: {e}")
+    
+    # Delete report file if exists
+    from app.utils.file_handler import delete_report_file
+    try:
+        delete_report_file(meeting_id)
+    except Exception as e:
+        # Log error but don't fail the request
+        print(f"Warning: Failed to delete report file for meeting {meeting_id}: {e}")
 
 
 @router.post("/{meeting_id}/report", response_model=ReportResponse)
@@ -494,8 +535,68 @@ async def generate_meeting_report(
         include_timestamps=request.include_timestamps
     )
     
+    # Save report to disk
+    from app.utils.file_handler import save_report_file
+    try:
+        report_file_path = save_report_file(meeting.id, markdown_content)
+    except Exception as e:
+        # Log error but don't fail - report is still returned in response
+        print(f"Warning: Failed to save report file: {e}")
+        report_file_path = None
+    
     return ReportResponse(
         meeting_id=meeting.id,
         content=markdown_content,
+        file_path=report_file_path,
         generated_at=datetime.utcnow()
+    )
+
+
+@router.get("/{meeting_id}/report/download")
+async def download_meeting_report(
+    meeting_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    """
+    Download meeting report as Markdown file.
+    
+    Args:
+        meeting_id: Meeting ID
+        current_user: Authenticated user
+        db: Database session
+        
+    Returns:
+        Markdown file download
+    """
+    # Verify meeting exists and belongs to user
+    result = await db.execute(
+        select(Meeting).where(Meeting.id == meeting_id, Meeting.user_id == current_user.id)
+    )
+    
+    meeting = result.scalar_one_or_none()
+    
+    if not meeting:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Meeting not found"
+        )
+    
+    # Check if report file exists
+    from app.utils.file_handler import REPORTS_DIR
+    from pathlib import Path
+    
+    report_filename = f"meeting_{meeting_id}_report.md"
+    report_path = REPORTS_DIR / report_filename
+    
+    if not report_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report file not found. Please generate the report first."
+        )
+    
+    return FileResponse(
+        path=str(report_path),
+        filename=report_filename,
+        media_type="text/markdown"
     )
