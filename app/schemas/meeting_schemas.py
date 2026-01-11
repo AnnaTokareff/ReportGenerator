@@ -83,7 +83,8 @@ class TranscriptionResponse(BaseModel):
     summary: Optional[str] = None
     language: str
     confidence_score: Optional[float] = None
-    segments: Optional[dict] = None
+    # segments can be a list of dicts or a dict depending on format
+    segments: Optional[dict | list] = None
     created_at: datetime
 
     class Config:
@@ -188,6 +189,10 @@ class ReportResponse(BaseModel):
     content: str = Field(
         ...,
         description="Report content in Markdown format"
+    )
+    file_path: Optional[str] = Field(
+        None,
+        description="Path to saved report file (if saved to disk)"
     )
     generated_at: datetime
 

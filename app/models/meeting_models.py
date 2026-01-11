@@ -138,7 +138,8 @@ class Transcription(Base):
     
     # Segments with timestamps (JSON format for flexibility)
     # Format: [{"start": 0.0, "end": 5.2, "text": "Hello everyone", "speaker": "Speaker 1"}]
-    segments: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Note: Stored as JSON, can be list or dict depending on format
+    segments: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -199,7 +200,7 @@ class Decision(Base):
     context: Mapped[str | None] = mapped_column(Text, nullable=True)
     
     # Store participants as JSON list: ["John Doe", "Jane Smith"]
-    participants: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    participants: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(
         DateTime,

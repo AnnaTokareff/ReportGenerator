@@ -55,7 +55,10 @@ class Settings(BaseSettings):
     DB_PASSWORD: str = os.getenv("DB_PASSWORD", "")
     DB_HOST: str = os.getenv("DB_HOST", "")
     DB_PORT: str = os.getenv("DB_PORT", "")
-    DB_NAME: str = os.getenv("DB_NAME", "db.sqlite3")
+    DB_NAME: str = os.getenv("DB_NAME", "app.db")
+
+    # OpenAI API
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 
     @property
     def DATABASE_URL(self) -> str:
