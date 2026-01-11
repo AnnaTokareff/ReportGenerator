@@ -7,9 +7,15 @@ from openai import AsyncOpenAI
 
 class MeetingAnalysisService:
     def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        # Try to get API key from parameter, then from settings, then from environment
+        if api_key:
+            self.api_key = api_key
+        else:
+            from app.core.config import settings
+            self.api_key = settings.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY", "")
+        
         if not self.api_key:
-            raise ValueError("OpenAI API key not found...")
+            raise ValueError("OpenAI API key not found. Please set OPENAI_API_KEY in .env file or environment variables.")
         
         self.client = AsyncOpenAI(api_key=self.api_key)
         self.model = model
@@ -45,81 +51,85 @@ class MeetingAnalysisService:
             raise Exception(f"Analysis failed: {str(e)}")
     
     def _get_system_prompt(self, language: str) -> str:
-        prompts = {
-            "en": 
-                
-                """You are an expert meeting analyst. Analyze meeting transcriptions and extract structured information.
-
-                    Return a JSON object with this structure:
-                    {
-                        "summary": "A concise summary (2-3 paragraphs)",
-                        "topics": [{"name": "Topic name", "relevance_score": 0.0-1.0}],
-                        "decisions": [{
-                            "decision_text": "What was decided",
-                            "context": "Additional context if available",
-                            "participants": ["Name1", "Name2"] or null
-                        }],
-                        "action_items": [{
-                            "task_description": "What needs to be done",
-                            "assignee": "Person name or null",
-                            "due_date": "YYYY-MM-DD or null",
-                            "priority": "low|medium|high|urgent"
-                        }]
-                    }
-
-                    Be precise and only extract information clearly stated in the transcription.""",
-                    
-                    
-            "fr": 
-                
-                """Vous êtes un expert en analyse de réunions. Analysez les transcriptions et extrayez des informations structurées.
-
-                    Retournez un objet JSON avec cette structure:
-                    {
-                        "summary": "Un résumé concis (2-3 paragraphes)",
-                        "topics": [{"name": "Nom du sujet", "relevance_score": 0.0-1.0}],
-                        "decisions": [{
-                            "decision_text": "Ce qui a été décidé",
-                            "context": "Contexte supplémentaire si disponible",
-                            "participants": ["Nom1", "Nom2"] ou null
-                        }],
-                        "action_items": [{
-                            "task_description": "Ce qui doit être fait",
-                            "assignee": "Nom de la personne ou null",
-                            "due_date": "YYYY-MM-DD ou null",
-                            "priority": "low|medium|high|urgent"
-                        }]
-                    }
-
-                    Soyez précis et n'extrayez que les informations clairement énoncées."""
+        """
+        Get system prompt for analysis.
+        Always instructs to respond in the same language as the transcription.
+        """
+        # Map language codes to language names for better prompts
+        lang_names = {
+            "en": "English",
+            "fr": "French",
+            "de": "German",
+            "es": "Spanish",
+            "it": "Italian",
+            "pt": "Portuguese",
+            "ru": "Russian",
+            "ja": "Japanese",
+            "ko": "Korean",
+            "zh": "Chinese",
+            "ar": "Arabic",
+            "hi": "Hindi",
         }
-        return prompts.get(language, prompts["en"])
+        
+        lang_name = lang_names.get(language, language.upper())
+        
+        return f"""You are an expert meeting analyst. Analyze meeting transcriptions and extract structured information.
+
+IMPORTANT: Respond in {lang_name} (the same language as the transcription).
+
+Return a JSON object with this structure:
+{{
+    "summary": "A concise summary (2-3 paragraphs) in {lang_name}",
+    "topics": [{{"name": "Topic name in {lang_name}", "relevance_score": 0.0-1.0}}],
+    "decisions": [{{
+        "decision_text": "What was decided (in {lang_name})",
+        "context": "Additional context if available (in {lang_name})",
+        "participants": ["Name1", "Name2"] or null
+    }}],
+    "action_items": [{{
+        "task_description": "What needs to be done (in {lang_name})",
+        "assignee": "Person name or null",
+        "due_date": "YYYY-MM-DD or null",
+        "priority": "low|medium|high|urgent"
+    }}]
+}}
+
+Be precise and only extract information clearly stated in the transcription.
+All text fields must be in {lang_name}."""
     
     def _build_analysis_prompt(self, transcription_text: str, language: str) -> str:
-        prompts = {
-            "en": 
-                f"""Analyze this meeting transcription and extract:
-                    1. A concise summary (2-3 paragraphs)
-                    2. Main topics discussed (with relevance scores 0.0-1.0)
-                    3. Decisions made
-                    4. Action items with assignees, due dates, and priorities
-
-                    Transcription:
-                    {transcription_text}
-
-                    Return as JSON following the specified structure.""",
-                                "fr": f"""Analysez cette transcription de réunion et extrayez:
-                    1. Un résumé concis (2-3 paragraphes)
-                    2. Les principaux sujets discutés (avec scores 0.0-1.0)
-                    3. Les décisions prises
-                    4. Les éléments d'action avec assignés, dates et priorités
-
-                    Transcription:
-                    {transcription_text}
-
-                Retournez en JSON suivant la structure spécifiée."""
+        """
+        Build analysis prompt. Always instructs to respond in the transcription language.
+        """
+        lang_names = {
+            "en": "English",
+            "fr": "French",
+            "de": "German",
+            "es": "Spanish",
+            "it": "Italian",
+            "pt": "Portuguese",
+            "ru": "Russian",
+            "ja": "Japanese",
+            "ko": "Korean",
+            "zh": "Chinese",
+            "ar": "Arabic",
+            "hi": "Hindi",
         }
-        return prompts.get(language, prompts["en"])
+        
+        lang_name = lang_names.get(language, language.upper())
+        
+        return f"""Analyze this meeting transcription and extract the following information.
+All responses must be in {lang_name} (the same language as the transcription):
+
+1. A concise summary (2-3 paragraphs) in {lang_name}
+2. Main topics discussed (with relevance scores 0.0-1.0) - topic names in {lang_name}
+3. Decisions made - decision text in {lang_name}
+4. Action items with assignees, due dates, and priorities - task descriptions in {lang_name}
+
+Transcription:
+{transcription_text}
+
+Return as JSON following the specified structure. Remember: all text content must be in {lang_name}."""
 
 
 _analysis_service: Optional[MeetingAnalysisService] = None

@@ -30,6 +30,7 @@ dependencies = [
     "pydub>=0.25.0", # For audio file processing
     "sentence-transformers>=2.2.0", # For semantic search (CPU-based, no GPU needed)
     "numpy>=1.24.0", # For vector operations
+    "streamlit>=1.28.0", # For web interface (optional)
 ]
 
 [tool.hatch.build.targets.wheel]
