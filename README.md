@@ -2,7 +2,7 @@
 
 A FastAPI application for generating meeting reports from audio files, similar to Noota. The tool can receive audio files via API and generate transcriptions, structured summaries, decisions, and action items. Includes a RAG-based assistant that answers questions based on meeting transcriptions.
 
-## 🚀 Features
+## ✨ Features
 
 - **Audio Transcription**: Convert audio/video files to text using OpenAI Whisper
 - **Meeting Analysis**: Extract topics, decisions, and action items using GPT
@@ -13,7 +13,7 @@ A FastAPI application for generating meeting reports from audio files, similar t
 - **Docker Support**: Ready-to-use Docker configurations
 - **Streamlit UI**: User-friendly web interface (optional)
 
-## 📋 Table of Contents
+## Table of Contents
 
 - [Quick Start](#-quick-start)
 - [Installation](#-installation)
@@ -26,7 +26,7 @@ A FastAPI application for generating meeting reports from audio files, similar t
 - [Testing](#-testing)
 - [Production Deployment](#-production-deployment)
 
-## 🏃 Quick Start
+##  Quick Start
 
 ### Prerequisites
 
@@ -35,7 +35,7 @@ A FastAPI application for generating meeting reports from audio files, similar t
 - OpenAI API key ([Get one here](https://platform.openai.com/api-keys))
 - ffmpeg (for local installation, for audio file processing)
 
-### Option 1: Docker (Recommended) 🐳
+### Option 1: Docker (Recommended) 
 
 1. **Clone the repository:**
    ```bash
@@ -117,7 +117,7 @@ A FastAPI application for generating meeting reports from audio files, similar t
    uvicorn main:app --reload
    ```
 
-## ⚙️ Configuration
+## Configuration
 
 ### Environment Variables
 
@@ -125,9 +125,19 @@ A FastAPI application for generating meeting reports from audio files, similar t
 |----------|-------------|---------|----------|
 | `SECRET_KEY` | JWT secret key (min 32 chars) | - | Yes |
 | `OPENAI_API_KEY` | OpenAI API key | - | Yes |
-| `DB_ENGINE` | Database engine (`sqlite` or `postgresql`) | `sqlite` | No |
+| `DB_ENGINE` | Database engine (`sqlite`) | `sqlite` | No |
 | `DB_NAME` | Database name | `app.db` | No |
 | `DEBUG` | Debug mode | `true` | No |
+
+**About SECRET_KEY:**
+- Used to sign JWT authentication tokens
+- Can be any random string (recommended: 32+ characters)
+- Generate one with: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+- **Important:** Keep it secret in production!
+
+**File Size Limit:**
+- Maximum file size: **25 MB** (Whisper API limitation)
+- For longer files, the system automatically compresses/trims files
 
 ### Database Configuration
 
@@ -136,18 +146,7 @@ A FastAPI application for generating meeting reports from audio files, similar t
 DB_ENGINE=sqlite
 DB_NAME=app.db
 ```
-
-**PostgreSQL:**
-```env
-DB_ENGINE=postgresql
-DB_USER=postgres
-DB_PASSWORD=password
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=meeting_reporter
-```
-
-## 🚀 Running the Application
+##  Running the Application
 
 ### Docker
 
@@ -184,7 +183,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 - **ReDoc**: http://localhost:8000/redoc
 - **Health Check**: http://localhost:8000/health
 
-## 📡 API Usage
+## API Usage
 
 ### Authentication
 
@@ -211,9 +210,16 @@ Response:
 }
 ```
 
+**3. Refresh access token:**
+```bash
+curl -X POST "http://localhost:8000/auth/token/refresh" \
+  -H "Content-Type: application/json" \
+  -d '{"refresh_token": "YOUR_REFRESH_TOKEN"}'
+```
+
 ### Meetings
 
-**3. Upload audio/video file:**
+**4. Upload audio/video file:**
 ```bash
 curl -X POST "http://localhost:8000/meetings/upload" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
@@ -223,27 +229,27 @@ curl -X POST "http://localhost:8000/meetings/upload" \
 
 **Supported formats:**
 - Audio: mp3, wav, ogg, m4a, webm
-- Video: mp4, mov, avi, webm, mkv, 3gp (Whisper extracts audio automatically)
+- Video: mp4, mov, avi, webm, mkv, 3gp 
 
-**4. Check processing status:**
+**5. Check processing status:**
 ```bash
 curl -X GET "http://localhost:8000/meetings/1/status" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
-**5. List all meetings:**
+**6. List all meetings:**
 ```bash
 curl -X GET "http://localhost:8000/meetings" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
-**6. Get meeting details:**
+**7. Get meeting details:**
 ```bash
 curl -X GET "http://localhost:8000/meetings/1" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
-**7. Generate report:**
+**8. Generate report:**
 ```bash
 curl -X POST "http://localhost:8000/meetings/1/report" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
@@ -251,14 +257,14 @@ curl -X POST "http://localhost:8000/meetings/1/report" \
   -d '{"include_transcription": true, "include_timestamps": false}'
 ```
 
-**8. Download report:**
+**9. Download report:**
 ```bash
 curl -X GET "http://localhost:8000/meetings/1/report/download" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -o report.md
 ```
 
-**9. Delete meeting:**
+**10. Delete meeting:**
 ```bash
 curl -X DELETE "http://localhost:8000/meetings/1" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
@@ -266,7 +272,7 @@ curl -X DELETE "http://localhost:8000/meetings/1" \
 
 ### RAG Assistant
 
-**10. Ask a question about your meetings:**
+**11. Ask a question about your meetings:**
 ```bash
 curl -X POST "http://localhost:8000/support/query" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
@@ -277,7 +283,7 @@ curl -X POST "http://localhost:8000/support/query" \
   }'
 ```
 
-**11. List meetings available for search:**
+**12. List meetings available for search:**
 ```bash
 curl -X GET "http://localhost:8000/support/meetings" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
@@ -299,7 +305,7 @@ curl -X GET "http://localhost:8000/meetings" \
   -H "X-API-Token: YOUR_API_TOKEN"
 ```
 
-## 🎨 Streamlit Interface
+##  Streamlit Interface
 
 The project includes an optional Streamlit web interface for easier interaction with the API.
 
@@ -309,6 +315,9 @@ The project includes an optional Streamlit web interface for easier interaction 
 ```bash
 # In one terminal
 uvicorn main:app --reload
+
+# or Docker
+docker compose up --build
 ```
 
 **2. Start Streamlit (in another terminal):**
@@ -368,7 +377,7 @@ If your API is running on a different host/port, edit `streamlit_app.py`:
 API_BASE_URL = "http://your-api-host:8000"
 ```
 
-## 🏗️ Project Structure
+## Project Structure
 
 ```
 meeting_reporter/
@@ -404,6 +413,7 @@ meeting_reporter/
 ├── reports/                  # Generated reports
 ├── main.py                   # FastAPI app entry point
 ├── streamlit_app.py          # Streamlit UI
+├── run_pipeline.py           # Automated pipeline script
 ├── docker-compose.yml        # Production Docker
 ├── docker-compose.dev.yml    # Development Docker
 ├── Dockerfile                # Docker image
@@ -411,7 +421,7 @@ meeting_reporter/
 └── README.md                 # This file
 ```
 
-## 🏛️ Architecture
+## Architecture
 
 ### System Design
 
@@ -474,7 +484,7 @@ meeting_reporter/
 5. **LLM Generation**: GPT generates answer based on context
 6. **Response**: Answer with confidence score and sources
 
-## 🧪 Testing
+## Testing
 
 ### Run Tests
 
@@ -499,7 +509,7 @@ Current test coverage includes:
 - Health check
 - Basic API functionality
 
-## 🚢 Production Deployment
+## Production Deployment
 
 ### Environment Setup
 
@@ -516,13 +526,8 @@ DB_PORT=5432
 DB_NAME=meeting_reporter
 ```
 
-**2. Use PostgreSQL for production:**
+**2. Run database migrations:**
 ```bash
-# Install PostgreSQL adapter
-pip install asyncpg
-
-# Update .env with PostgreSQL credentials
-# Run migrations
 alembic upgrade head
 ```
 
@@ -532,48 +537,43 @@ alembic upgrade head
 docker compose up --build -d
 ```
 
-### Security Considerations
+### Database Migrations
 
-- Use strong SECRET_KEY (32+ characters)
-- Keep OPENAI_API_KEY secure
-- Use HTTPS in production
-- Set DEBUG=false
-- Use PostgreSQL for production database
-- Implement rate limiting (recommended)
-- Set up proper logging and monitoring
+Create new migration:
+```bash
+alembic revision --autogenerate -m "Description"
+```
 
-## 📚 Additional Documentation
+Apply migrations:
+```bash
+alembic upgrade head
+```
 
-- [Docker Guide](DOCKER_GUIDE.md) - Detailed Docker instructions
-- [Testing Guide](TESTING_GUIDE.md) - Testing instructions
-- [Pipeline Guide](PIPELINE_GUIDE.md) - Processing pipeline details
-- [Embedding Cache Guide](EMBEDDING_CACHE_GUIDE.md) - RAG optimization
-- [Tutorial](TUTORIAL/) - Detailed component documentation
+## 🔧 Quick Pipeline Execution
 
-## 🤝 Contributing
+**Easiest way** - use the automated Python script:
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+```bash
+# Install httpx if needed
+pip install httpx
 
-## 📝 License
+# Run full pipeline
+python run_pipeline.py --file meeting.mp3 --title "Team Meeting"
+```
 
-This project is licensed under the MIT License.
+The script automatically handles: registration, login, upload, processing wait, results retrieval, and report generation.
 
-## 🙏 Acknowledgments
+## Requirements
 
-- OpenAI for Whisper and GPT APIs
-- FastAPI for the excellent web framework
-- Sentence-transformers for semantic search
+- Python 3.11+
+- OpenAI API key
+- (Optional) Docker and Docker Compose
+- (Optional) ffmpeg for local installation
 
-## 📧 Support
+## License
 
-For issues and questions, please open an issue on GitHub.
-
----
+MIT
 
 **Version**: 0.1.0
 
-**Last Updated**: 2024
+**Last Updated**: January 2025
