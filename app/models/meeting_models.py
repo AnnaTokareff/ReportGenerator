@@ -60,7 +60,6 @@ class Meeting(Base):
     """
     Meeting model - stores meeting metadata and audio file information
     
-    Workflow:
     1) User uploads audio file -> meeting created with status=PENDING
     2) Background task starts -> status=PROCESSING
     3) Transcription completes -> status=COMPLETED
@@ -76,13 +75,13 @@ class Meeting(Base):
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     
-    # Audio file information
+    # audio file info
     audio_file_path: Mapped[str] = mapped_column(String(500), nullable=False)
-    audio_duration: Mapped[float | None] = mapped_column(Float, nullable=True)  # Duration in seconds
-    audio_format: Mapped[str | None] = mapped_column(String(10), nullable=True)  # mp3, wav, m4a, etc.
+    audio_duration: Mapped[float | None] = mapped_column(Float, nullable=True)  # duration
+    audio_format: Mapped[str | None] = mapped_column(String(10), nullable=True)  
     
-    # Processing status
-    language: Mapped[str | None] = mapped_column(String(10), nullable=True)  # Language code (en, ru, es, etc.)
+    # processing status
+    language: Mapped[str | None] = mapped_column(String(10), nullable=True)  
     status: Mapped[MeetingStatus] = mapped_column(
         SQLEnum(MeetingStatus),
         default=MeetingStatus.PENDING,
@@ -91,7 +90,7 @@ class Meeting(Base):
     )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     
-    # Timestamps
+    # timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -104,7 +103,7 @@ class Meeting(Base):
         nullable=False
     )
 
-    # Relationships
+    # relationships
     user: Mapped["User"] = relationship("User", back_populates="meetings")
     transcription: Mapped["Transcription | None"] = relationship(
         "Transcription",
@@ -134,12 +133,12 @@ class Meeting(Base):
 
 class Transcription(Base):
     """
-    Transcription model - stores transcribed text from audio.
+    Transcription model - stores transcribed text from audio
     
-    This is the core text that will be:
-    1. Indexed for semantic search
-    2. Used to extract summaries, topics, decisions, action items
-    3. Referenced when answering support queries
+    This is the text that will be:
+    1) Indexed for semantic search
+    2) Used to extract summaries, topics, decisions, action items
+    3) Referenced when answering support queries
     """
     __tablename__ = "transcriptions"
 
@@ -151,26 +150,26 @@ class Transcription(Base):
         index=True
     )
     
-    # Transcription content
+    # transcription content
     full_text: Mapped[str] = mapped_column(Text, nullable=False)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     
-    # Transcription metadata
+    #  metadata
     language: Mapped[str] = mapped_column(String(10), nullable=False)
     
-    # Segments with timestamps (JSON format for flexibility)
-    # Format: [{"start": 0.0, "end": 5.2, "text": "Hello everyone", "speaker": "Speaker 1"}]
-    # or dict format depending on source
+    # segments with timestamps in json
+    # [{"start": 0.0, "end": 5.2, "text": "Hello everyone", "speaker": "Speaker 1"}]
+    # or dict format 
     segments: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
     
-    # Timestamps
+    # timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False
     )
 
-    # Relationships
+    # relationships
     meeting: Mapped["Meeting"] = relationship("Meeting", back_populates="transcription")
     chunks: Mapped[list["TranscriptionChunk"]] = relationship(
         "TranscriptionChunk",
@@ -184,15 +183,12 @@ class Transcription(Base):
 
 class TranscriptionChunk(Base):
     """
-    TranscriptionChunk model - caches text chunks with embeddings for semantic search.
-    
-    Stores:
+    Caches text chunks with embeddings for semantic search.
+    It has:
     - Split transcription text into chunks
     - Pre-computed embeddings for each chunk
-    - Used for fast semantic search in support agent
+    - Used for fast semantic search in Rag assistant
     
-    Embeddings are generated once when transcription is saved,
-    significantly speeding up search in support agent.
     """
     __tablename__ = "transcription_chunks"
 
@@ -202,9 +198,9 @@ class TranscriptionChunk(Base):
         nullable=False,
         index=True
     )
-    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)  # Sequential chunk number
-    chunk_text: Mapped[str] = mapped_column(Text, nullable=False)  # Text of the chunk
-    embedding: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)  # Pickled numpy array
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)  #  chunk number
+    chunk_text: Mapped[str] = mapped_column(Text, nullable=False)  # text of the chunk
+    embedding: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)  # pickled numpy array
     
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -212,7 +208,7 @@ class TranscriptionChunk(Base):
         nullable=False
     )
 
-    # Relationships
+    # relationships
     transcription: Mapped["Transcription"] = relationship("Transcription", back_populates="chunks")
 
     def __repr__(self) -> str:
@@ -221,12 +217,7 @@ class TranscriptionChunk(Base):
 
 class MeetingTopic(Base):
     """
-    MeetingTopic model - stores extracted topics from meeting transcriptions.
-    
-    Used for:
-    - Categorizing meetings
-    - Improving search relevance
-    - Understanding meeting themes
+    Stores extracted topics from meeting transcriptions
     """
     __tablename__ = "meeting_topics"
 
@@ -242,7 +233,7 @@ class MeetingTopic(Base):
         Float,
         default=1.0,
         nullable=False
-    )  # Relevance score (0.0 to 1.0)
+    )  # relevance score (0.0 to 1.0)
     
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -250,7 +241,7 @@ class MeetingTopic(Base):
         nullable=False
     )
 
-    # Relationships
+    # relationships
     meeting: Mapped["Meeting"] = relationship("Meeting", back_populates="topics")
 
     def __repr__(self) -> str:
@@ -259,12 +250,7 @@ class MeetingTopic(Base):
 
 class Decision(Base):
     """
-    Decision model - stores decisions made during meetings.
-    
-    This is CRITICAL for the support agent:
-    - High confidence source (official meeting decision)
-    - Can be directly referenced in responses
-    - Example: "According to meeting on Jan 15, we decided to increase budget by 20%"
+    Stores decisions made during meetings
     """
     __tablename__ = "decisions"
 
@@ -276,9 +262,9 @@ class Decision(Base):
     )
     
     decision_text: Mapped[str] = mapped_column(Text, nullable=False)
-    context: Mapped[str | None] = mapped_column(Text, nullable=True)  # Context in which decision was made
+    context: Mapped[str | None] = mapped_column(Text, nullable=True)  
     
-    # Store participants as JSON list: ["John Doe", "Jane Smith"]
+    # Store participants as json list
     participants: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(
@@ -287,7 +273,7 @@ class Decision(Base):
         nullable=False
     )
 
-    # Relationships
+    # relationships
     meeting: Mapped["Meeting"] = relationship("Meeting", back_populates="decisions")
 
     def __repr__(self) -> str:
@@ -296,12 +282,12 @@ class Decision(Base):
 
 class ActionItem(Base):
     """
-    ActionItem model - stores action items extracted from meetings.
+    Stores action items extracted from meetings
     
     Action items are:
     - Tasks assigned during meetings
     - Tracked for completion
-    - Referenced in support queries (e.g., "What are my pending tasks?")
+    - Referenced in support queries
     """
     __tablename__ = "action_items"
 
@@ -313,8 +299,8 @@ class ActionItem(Base):
     )
     
     task_description: Mapped[str] = mapped_column(Text, nullable=False)
-    assignee: Mapped[str | None] = mapped_column(String(255), nullable=True)  # Who is assigned the task
-    due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # Deadline
+    assignee: Mapped[str | None] = mapped_column(String(255), nullable=True)  # who is assigned the task
+    due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # deadline
     
     priority: Mapped[ActionItemPriority] = mapped_column(
         SQLEnum(ActionItemPriority),
@@ -340,7 +326,7 @@ class ActionItem(Base):
         nullable=False
     )
 
-    # Relationships
+    # relationships
     meeting: Mapped["Meeting"] = relationship("Meeting", back_populates="action_items")
 
     def __repr__(self) -> str:
