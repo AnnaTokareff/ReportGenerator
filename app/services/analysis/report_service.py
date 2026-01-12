@@ -1,8 +1,7 @@
 """
-Report generation service for meetings in Markdown format.
+Report generation service for meetings in Markdown format
 
-Uses template-based approach - fast, free, and predictable.
-No LLM required, just structured data formatting.
+Uses template-based approach for simpliness
 """
 from typing import Optional
 
@@ -11,20 +10,15 @@ from app.models.meeting_models import Meeting
 
 class ReportService:
     """
-    Service for generating meeting reports in Markdown format.
-    
-    Uses template-based generation - fast, predictable, no API costs.
+    Service for generating meeting reports in Markdown format    
     """
     
     def __init__(self):
         pass
     
-    async def generate_markdown(
-        self,
-        meeting: Meeting,
-        include_transcription: bool = True,
-        include_timestamps: bool = False,
-    ) -> str:
+    async def generate_markdown(self, meeting: Meeting,
+        include_transcription: bool = True, include_timestamps: bool = False,) -> str:
+        
         """
         Generate Markdown report for a meeting.
         
@@ -40,18 +34,9 @@ class ReportService:
             meeting, include_transcription, include_timestamps
         )
     
-    def _generate_markdown_template(
-        self,
-        meeting: Meeting,
-        include_transcription: bool = True,
-        include_timestamps: bool = False
-    ) -> str:
-        """
-        Template-based report generation.
+    def _generate_markdown_template(self, meeting: Meeting,
+        include_transcription: bool = True, include_timestamps: bool = False) -> str:
         
-        Fast, free, and predictable approach - no LLM calls needed.
-        Simply formats the structured data into Markdown.
-        """
         lines = []
         
         # Header
@@ -103,7 +88,7 @@ class ReportService:
             lines.append("---")
             lines.append("")
         
-        # Action Items
+        # action Items
         if meeting.action_items:
             lines.append("## Action Items")
             lines.append("")
@@ -126,18 +111,31 @@ class ReportService:
             lines.append("")
             
             if include_timestamps and meeting.transcription.segments:
-                # Include segments with timestamps
+                # Include segments with timestamps and speaker grouping
                 segments = meeting.transcription.segments
                 if isinstance(segments, list):
+                    current_speaker = None
                     for segment in segments:
                         start = segment.get("start", 0)
                         end = segment.get("end", 0)
                         text = segment.get("text", "")
-                        lines.append(f"[{start:.1f}s - {end:.1f}s] {text}")
+                        speaker = segment.get("speaker")  
+                        
+                        # Group by speaker
+                        if speaker and speaker != current_speaker:
+                            lines.append("")
+                            lines.append(f"### {speaker}")
+                            lines.append("")
+                            current_speaker = speaker
+                        
+                        if speaker:
+                            lines.append(f"[{start:.1f}s - {end:.1f}s] {text}")
+                        else:
+                            lines.append(f"[{start:.1f}s - {end:.1f}s] {text}")
                 else:
                     lines.append(meeting.transcription.full_text)
             else:
-                # Just full text
+                #  full text
                 lines.append(meeting.transcription.full_text)
             
             lines.append("")
@@ -149,7 +147,6 @@ _report_service: Optional[ReportService] = None
 
 
 def get_report_service() -> ReportService:
-    """Get or create report service instance."""
     global _report_service
     if _report_service is None:
         _report_service = ReportService()
@@ -157,5 +154,4 @@ def get_report_service() -> ReportService:
 
 
 def get_report() -> ReportService:
-    """Alias for get_report_service for backward compatibility."""
     return get_report_service()
