@@ -1,12 +1,28 @@
-version: "3.8"
-
 services:
   web:
     build: .
     command: ./start-dev.sh
     volumes:
       - .:/app
+      - uploads_data:/app/uploads
+      - reports_data:/app/reports
     ports:
       - "8000:8000"
     environment:
       - DEBUG=true
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    # Auto-reload при изменении файлов
+    develop:
+      watch:
+        - action: sync
+          path: ./app
+          target: /app/app
+        - action: sync
+          path: ./main.py
+          target: /app/main.py
+
+volumes:
+  uploads_data:
+  reports_data:

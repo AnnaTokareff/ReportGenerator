@@ -14,10 +14,54 @@ A FastAPI application for generating meeting reports from audio files, similar t
 
 ## Quick Start
 
+### Option 1: Docker (Recommended) 🐳
+
+**Самый простой способ запуска:**
+
+1. **Установите Docker** (если еще не установлен):
+   - macOS: `brew install --cask docker`
+   - Linux: `curl -fsSL https://get.docker.com -o get-docker.sh && sh get-docker.sh`
+   - См. подробности: [DOCKER_INSTALL.md](DOCKER_INSTALL.md)
+
+2. **Создайте `.env` файл:**
+   ```env
+   SECRET_KEY=your-secret-key-minimum-32-characters-long
+   OPENAI_API_KEY=sk-your-openai-api-key
+   DB_ENGINE=sqlite
+   DB_NAME=app.db
+   ```
+
+3. **Запустите Docker:**
+   
+   **Простой способ (скрипт-помощник):**
+   ```bash
+   ./docker-run.sh dev  # Режим разработки
+   # или
+   ./docker-run.sh      # Production режим
+   ```
+   
+   **Или вручную:**
+   ```bash
+   # Новая версия Docker (рекомендуется)
+   docker compose -f docker-compose.dev.yml up --build
+   
+   # Старая версия (если docker compose не работает)
+   docker-compose -f docker-compose.dev.yml up --build
+   ```
+
+4. **Откройте в браузере:**
+   - API: http://localhost:8000
+   - Документация: http://localhost:8000/docs
+
+**Подробная инструкция:** См. [DOCKER_GUIDE.md](DOCKER_GUIDE.md) или [QUICK_START_DOCKER.md](QUICK_START_DOCKER.md)
+
+### Option 2: Local Installation
+
 ### Prerequisites
 
 - Python 3.11+
 - OpenAI API key ([Get one here](https://platform.openai.com/api-keys))
+- ffmpeg (для работы с аудио файлами)
 
 ### Installation
 
@@ -30,7 +74,12 @@ A FastAPI application for generating meeting reports from audio files, similar t
 
 2. **Install dependencies:**
    ```bash
-   pip install -e ".[dev]"
+   pip install -r requirements.txt
+   ```
+   
+   **Note:** If you see `ModuleNotFoundError: No module named 'openai'`, install missing packages:
+   ```bash
+   pip install openai pydub sentence-transformers numpy
    ```
 
 3. **Create `.env` file:**
@@ -92,14 +141,24 @@ curl -X POST "http://localhost:8000/auth/login" \
   -d '{"username": "user", "password": "pass123"}'
 ```
 
-### 2. Upload Audio File
+### 2. Upload Audio or Video File
 ```bash
+# Audio file
 curl -X POST "http://localhost:8000/meetings/upload" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -F "title=Team Meeting" \
-  -F "language=en" \
   -F "file=@meeting.mp3"
+
+# Video file (Whisper automatically extracts audio)
+curl -X POST "http://localhost:8000/meetings/upload" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -F "title=Video Meeting" \
+  -F "file=@meeting.mp4"
 ```
+
+**Note:** 
+- Language is automatically detected by Whisper API. Supports any language that Whisper can detect.
+- Video files are supported (mp4, mov, avi, webm, mkv, 3gp). Whisper API automatically extracts audio from video - no conversion needed!
 
 ### 3. Check Status
 ```bash
@@ -155,10 +214,21 @@ Environment variables (`.env` file):
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DEBUG` | Debug mode | `true` |
-| `SECRET_KEY` | JWT secret key | Required |
+| `SECRET_KEY` | JWT secret key (any random string, min 32 chars recommended) | Required |
 | `OPENAI_API_KEY` | OpenAI API key | Required |
 | `DB_ENGINE` | Database engine | `sqlite` |
 | `DB_NAME` | Database name | `app.db` |
+
+**About SECRET_KEY:**
+- Used to sign JWT authentication tokens
+- Can be any random string (recommended: 32+ characters)
+- Generate one with: `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+- **Important:** Keep it secret in production!
+
+**File Size Limit:**
+- Maximum file size: **25 MB** (Whisper API limitation)
+- For longer files (e.g., 1-hour meeting), compress the file first
+- See [PIPELINE_GUIDE.md](PIPELINE_GUIDE.md) for compression instructions
 
 For PostgreSQL:
 ```
@@ -201,9 +271,57 @@ pytest
 pytest --cov=app
 ```
 
+## Quick Pipeline Execution
+
+**Easiest way** - use the automated Python script:
+
+```bash
+# Install httpx if needed
+pip install httpx
+
+# Run full pipeline
+python run_pipeline.py --file meeting.mp3 --title "Team Meeting"
+```
+
+The script automatically handles: registration, login, upload, processing wait, results retrieval, and report generation.
+
+See [PIPELINE_GUIDE.md](PIPELINE_GUIDE.md) for detailed instructions.
+
+## Web Interface (Streamlit)
+
+**Optional but recommended** - A simple web interface for easy use:
+
+```bash
+# Install Streamlit (if not already installed)
+pip install streamlit
+
+# Start API server (in one terminal)
+uvicorn main:app --reload
+
+# Start Streamlit interface (in another terminal)
+streamlit run streamlit_app.py
+```
+
+The interface will open at `http://localhost:8501` and provides:
+- 📤 **File Upload** - Drag-and-drop interface for audio/video files
+- 📋 **My Meetings** - View all your meetings with details
+- 🤖 **Support Agent** - Ask questions about your meetings
+- 📄 **Report Generation** - Generate and download Markdown reports
+
+**Note:** Streamlit is optional. You can also use:
+- API directly (curl, httpx)
+- `run_pipeline.py` script
+- Swagger UI at `http://localhost:8000/docs`
+
+See [STREAMLIT_GUIDE.md](STREAMLIT_GUIDE.md) for detailed instructions.
+
 ## Documentation
 
-For detailed documentation in Russian, see [README_RU.md](README_RU.md)
+- **Detailed Russian documentation**: [README_RU.md](README_RU.md)
+- **Testing guide**: [TESTING_GUIDE.md](TESTING_GUIDE.md) - Step-by-step guide to test the project
+- **Complete Pipeline guide**: [PIPELINE_GUIDE.md](PIPELINE_GUIDE.md) - Full end-to-end pipeline execution guide
+- **Streamlit Interface guide**: [STREAMLIT_GUIDE.md](STREAMLIT_GUIDE.md) - Web interface usage guide
+- **Code Tutorial**: [TUTORIAL/README.md](TUTORIAL/README.md) - Detailed explanations of all code files
 
 ## Requirements
 

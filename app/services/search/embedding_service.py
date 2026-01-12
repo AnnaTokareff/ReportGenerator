@@ -3,8 +3,8 @@ Embedding service for semantic search.
 
 Uses sentence-transformers on CPU - no GPU required, free and efficient.
 """
-import os
 from typing import List, Optional
+
 import numpy as np
 from numpy.linalg import norm
 

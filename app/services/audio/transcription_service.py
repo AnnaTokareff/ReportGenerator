@@ -8,8 +8,22 @@ from openai import AsyncOpenAI
 
 
 class TranscriptionService:
+    """
+    Service for transcribing audio files using OpenAI Whisper API.
+    
+    Handles audio file transcription with automatic language detection,
+    retry logic for network issues, and proper timeout handling.
+    """
+    
     def __init__(self, api_key: Optional[str] = None):
-        # Try to get API key from parameter, then from environment, then from settings
+        """
+        Initialize transcription service.
+        
+        API key priority:
+        1. Provided parameter
+        2. Settings (from .env)
+        3. Environment variable
+        """
         if api_key:
             self.api_key = api_key
         else:
@@ -17,7 +31,7 @@ class TranscriptionService:
             self.api_key = settings.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY", "")
         
         if not self.api_key:
-            raise ValueError("OpenAI API key not found. Please set OPENAI_API_KEY in .env file or environment variables.")
+            raise ValueError("OpenAI API key not found. Set it in the .env")
         
         # Create client with extended timeout for large file uploads
         # Default timeout is 60s, but we need more for large files

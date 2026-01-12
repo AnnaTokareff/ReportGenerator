@@ -86,7 +86,7 @@ app.include_router(...)  # Подключение роутеров
   - `id`, `user_id`, `title`
   - `audio_file_path` - путь к аудиофайлу
   - `status` - статус обработки (pending, processing, completed, failed)
-  - `language` - язык встречи
+  - `language` - язык встречи (определяется автоматически)
   - Связи: transcription, topics, decisions, action_items
 
 - **`Transcription`** - транскрипт встречи:
@@ -116,7 +116,7 @@ app.include_router(...)  # Подключение роутеров
 #### `meetings_api.py` - работа с встречами
 
 **POST `/meetings/upload`** - загрузка аудиофайла:
-1. Принимает файл, название встречи, язык
+1. Принимает файл и название встречи (язык определяется автоматически)
 2. Валидирует файл (тип, размер)
 3. Сохраняет файл на диск
 4. Создает запись Meeting в БД со статусом PENDING
@@ -172,9 +172,9 @@ app.include_router(...)  # Подключение роутеров
 **Класс `TranscriptionService`:**
 - Использует OpenAI Whisper API
 - Метод `transcribe_audio()`:
-  - Принимает путь к аудиофайлу и язык
-  - Отправляет файл в OpenAI
-  - Получает текст, язык, сегменты с временными метками
+  - Принимает путь к аудиофайлу (язык определяется автоматически)
+  - Отправляет файл в OpenAI Whisper API
+  - Получает текст, определенный язык, сегменты с временными метками
   - Возвращает структурированный результат
 
 #### `llm/analysis_service.py` - анализ транскриптов
@@ -284,11 +284,16 @@ source venv/bin/activate
 ### Шаг 2: Установка зависимостей
 
 ```bash
-# Установить зависимости
-pip install -e ".[dev]"
-
-# Или если используете requirements.txt:
+# Установить зависимости из requirements.txt
 pip install -r requirements.txt
+
+# Или если используете pyproject.toml:
+# pip install -e ".[dev]"
+```
+
+**Важно:** Если видите ошибку `ModuleNotFoundError: No module named 'openai'`, выполните:
+```bash
+pip install openai pydub sentence-transformers numpy
 ```
 
 ### Шаг 3: Настройка переменных окружения
@@ -404,20 +409,32 @@ curl -X POST "http://localhost:8000/auth/login" \
 
 Ответ содержит `access_token` - используйте его для авторизованных запросов.
 
-### 2. Загрузка аудиофайла
+### 2. Загрузка аудио или видео файла
 
 ```bash
+# Аудио файл
 curl -X POST "http://localhost:8000/meetings/upload" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -F "title=Team Meeting" \
-  -F "language=en" \
   -F "file=@/path/to/your/audio.mp3"
+
+# Видео файл (Whisper автоматически извлекает аудио)
+curl -X POST "http://localhost:8000/meetings/upload" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -F "title=Video Meeting" \
+  -F "file=@/path/to/your/video.mp4"
 ```
 
 **Параметры:**
 - `title` (обязательно) - название встречи
-- `language` (опционально) - язык (en, fr, ru и т.д.), по умолчанию "en"
-- `file` (обязательно) - аудиофайл (mp3, wav, ogg, m4a, mp4)
+- Язык определяется автоматически Whisper API. Поддерживаются все языки, которые может распознать Whisper.
+- `file` (обязательно) - аудио или видео файл
+
+**Поддерживаемые форматы:**
+- **Аудио:** mp3, wav, ogg, m4a, webm
+- **Видео:** mp4, mov, avi, webm, mkv, 3gp
+
+**Важно:** Whisper API автоматически извлекает аудио из видео файлов. Конвертация не требуется!
 
 **Ответ:**
 ```json

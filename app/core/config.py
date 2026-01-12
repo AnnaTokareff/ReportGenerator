@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     """Application settings class."""
 
     PROJECT_NAME: str = "Meeting Reporter API"
-    PROJECT_DESCRIPTION: str = "API for generating meeting reports from audio files with support agent"
+    PROJECT_DESCRIPTION: str = "API for generating meeting reports from audio files with RAG-based assistant"
     VERSION: str = "0.1.0"
     API_PREFIX: str = ""
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"

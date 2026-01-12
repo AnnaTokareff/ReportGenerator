@@ -1,18 +1,30 @@
 """
-Meeting models for audio transcription and analysis.
-- Meeting: Stores meeting metadata and audio file info
-- Transcription: Stores the transcribed text from meetings
-- MeetingTopic: Stores extracted topics from meetings
-- Decision: Stores decisions made during meetings
-- ActionItem: Stores action items extracted from meetings
+Models:
+- Meeting: Main meeting metadata and audio file info
+- Transcription: Transcribed text from meetings
+- TranscriptionChunk: Text chunks with embeddings for semantic search
+- MeetingTopic: Extracted topics from meetings
+- Decision: Decisions made during meetings
+- ActionItem: Action items extracted from meetings
 """
 
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum as SQLEnum, ForeignKey, String, Text, Float, Integer, JSON
+from sqlalchemy import (
+    String,
+    Text,
+    Float,
+    DateTime,
+    ForeignKey,
+    Enum as SQLEnum,
+    JSON,
+    LargeBinary,
+    Integer,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.sql import func
 
 from app.db.base import Base
 
@@ -21,15 +33,15 @@ if TYPE_CHECKING:
 
 
 class MeetingStatus(str, Enum):
-    """Meeting processing status enumeration."""
-    PENDING = "pending"  # Just uploaded, not processed yet
-    PROCESSING = "processing"  # Currently being transcribed
-    COMPLETED = "completed"  # Successfully processed
-    FAILED = "failed"  # Processing failed
+    """Meet processing status"""
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class ActionItemStatus(str, Enum):
-    """Action item status enumeration."""
+    """Task status"""
     TODO = "todo"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
@@ -37,7 +49,7 @@ class ActionItemStatus(str, Enum):
 
 
 class ActionItemPriority(str, Enum):
-    """Action item priority enumeration."""
+    """Task priority"""
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -46,42 +58,49 @@ class ActionItemPriority(str, Enum):
 
 class Meeting(Base):
     """
-    Meeting model - stores meeting metadata and audio file information.
-    1. User uploads audio file -> meeting is created with status=PENDING
-    2. Background task starts -> status=PROCESSING
-    3. Transcription completes -> status=COMPLETED
-    4. If error -> status=FAILED
+    Meeting model - stores meeting metadata and audio file information
+    
+    Workflow:
+    1) User uploads audio file -> meeting created with status=PENDING
+    2) Background task starts -> status=PROCESSING
+    3) Transcription completes -> status=COMPLETED
+    4) If error occurs -> status=FAILED
     """
     __tablename__ = "meetings"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     
     # Audio file information
     audio_file_path: Mapped[str] = mapped_column(String(500), nullable=False)
-    audio_duration: Mapped[float | None] = mapped_column(Float, nullable=True)  # in seconds
-    audio_format: Mapped[str | None] = mapped_column(String(20), nullable=True)  # mp3, wav, etc.
+    audio_duration: Mapped[float | None] = mapped_column(Float, nullable=True)  # Duration in seconds
+    audio_format: Mapped[str | None] = mapped_column(String(10), nullable=True)  # mp3, wav, m4a, etc.
     
     # Processing status
+    language: Mapped[str | None] = mapped_column(String(10), nullable=True)  # Language code (en, ru, es, etc.)
     status: Mapped[MeetingStatus] = mapped_column(
         SQLEnum(MeetingStatus),
         default=MeetingStatus.PENDING,
-        nullable=False
+        nullable=False,
+        index=True
     )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     
-    # Metadata
-    language: Mapped[str | None] = mapped_column(String(10), nullable=True)  
+    # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False
     )
 
@@ -90,8 +109,8 @@ class Meeting(Base):
     transcription: Mapped["Transcription | None"] = relationship(
         "Transcription",
         back_populates="meeting",
-        cascade="all, delete-orphan",
-        uselist=False
+        uselist=False,
+        cascade="all, delete-orphan"
     )
     topics: Mapped[list["MeetingTopic"]] = relationship(
         "MeetingTopic",
@@ -109,10 +128,13 @@ class Meeting(Base):
         cascade="all, delete-orphan"
     )
 
+    def __repr__(self) -> str:
+        return f"<Meeting(id={self.id}, title='{self.title}', status='{self.status}')>"
+
 
 class Transcription(Base):
     """
-    Transcription model - stores the transcribed text from audio.
+    Transcription model - stores transcribed text from audio.
     
     This is the core text that will be:
     1. Indexed for semantic search
@@ -123,9 +145,10 @@ class Transcription(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     meeting_id: Mapped[int] = mapped_column(
-        ForeignKey("meetings.id"),
+        ForeignKey("meetings.id", ondelete="CASCADE"),
         nullable=False,
-        unique=True
+        unique=True,
+        index=True
     )
     
     # Transcription content
@@ -134,21 +157,66 @@ class Transcription(Base):
     
     # Transcription metadata
     language: Mapped[str] = mapped_column(String(10), nullable=False)
-    confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     
     # Segments with timestamps (JSON format for flexibility)
     # Format: [{"start": 0.0, "end": 5.2, "text": "Hello everyone", "speaker": "Speaker 1"}]
-    # Note: Stored as JSON, can be list or dict depending on format
+    # or dict format depending on source
     segments: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
     
+    # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False
     )
 
     # Relationships
     meeting: Mapped["Meeting"] = relationship("Meeting", back_populates="transcription")
+    chunks: Mapped[list["TranscriptionChunk"]] = relationship(
+        "TranscriptionChunk",
+        back_populates="transcription",
+        cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"<Transcription(id={self.id}, meeting_id={self.meeting_id}, language='{self.language}')>"
+
+
+class TranscriptionChunk(Base):
+    """
+    TranscriptionChunk model - caches text chunks with embeddings for semantic search.
+    
+    Stores:
+    - Split transcription text into chunks
+    - Pre-computed embeddings for each chunk
+    - Used for fast semantic search in support agent
+    
+    Embeddings are generated once when transcription is saved,
+    significantly speeding up search in support agent.
+    """
+    __tablename__ = "transcription_chunks"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    transcription_id: Mapped[int] = mapped_column(
+        ForeignKey("transcriptions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)  # Sequential chunk number
+    chunk_text: Mapped[str] = mapped_column(Text, nullable=False)  # Text of the chunk
+    embedding: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)  # Pickled numpy array
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False
+    )
+
+    # Relationships
+    transcription: Mapped["Transcription"] = relationship("Transcription", back_populates="chunks")
+
+    def __repr__(self) -> str:
+        return f"<TranscriptionChunk(id={self.id}, transcription_id={self.transcription_id}, chunk_index={self.chunk_index})>"
 
 
 class MeetingTopic(Base):
@@ -163,23 +231,30 @@ class MeetingTopic(Base):
     __tablename__ = "meeting_topics"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    meeting_id: Mapped[int] = mapped_column(ForeignKey("meetings.id"), nullable=False)
+    meeting_id: Mapped[int] = mapped_column(
+        ForeignKey("meetings.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
     
-    topic_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    topic_name: Mapped[str] = mapped_column(String(255), nullable=False)
     relevance_score: Mapped[float] = mapped_column(
         Float,
-        nullable=False,
-        default=1.0
-    )  # 0.0 to 1.0
+        default=1.0,
+        nullable=False
+    )  # Relevance score (0.0 to 1.0)
     
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False
     )
 
     # Relationships
     meeting: Mapped["Meeting"] = relationship("Meeting", back_populates="topics")
+
+    def __repr__(self) -> str:
+        return f"<MeetingTopic(id={self.id}, topic_name='{self.topic_name}', relevance={self.relevance_score})>"
 
 
 class Decision(Base):
@@ -194,22 +269,29 @@ class Decision(Base):
     __tablename__ = "decisions"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    meeting_id: Mapped[int] = mapped_column(ForeignKey("meetings.id"), nullable=False)
+    meeting_id: Mapped[int] = mapped_column(
+        ForeignKey("meetings.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
     
     decision_text: Mapped[str] = mapped_column(Text, nullable=False)
-    context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context: Mapped[str | None] = mapped_column(Text, nullable=True)  # Context in which decision was made
     
     # Store participants as JSON list: ["John Doe", "Jane Smith"]
     participants: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False
     )
 
     # Relationships
     meeting: Mapped["Meeting"] = relationship("Meeting", back_populates="decisions")
+
+    def __repr__(self) -> str:
+        return f"<Decision(id={self.id}, meeting_id={self.meeting_id})>"
 
 
 class ActionItem(Base):
@@ -224,11 +306,15 @@ class ActionItem(Base):
     __tablename__ = "action_items"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    meeting_id: Mapped[int] = mapped_column(ForeignKey("meetings.id"), nullable=False)
+    meeting_id: Mapped[int] = mapped_column(
+        ForeignKey("meetings.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
     
     task_description: Mapped[str] = mapped_column(Text, nullable=False)
-    assignee: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    assignee: Mapped[str | None] = mapped_column(String(255), nullable=True)  # Who is assigned the task
+    due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # Deadline
     
     priority: Mapped[ActionItemPriority] = mapped_column(
         SQLEnum(ActionItemPriority),
@@ -238,20 +324,24 @@ class ActionItem(Base):
     status: Mapped[ActionItemStatus] = mapped_column(
         SQLEnum(ActionItemStatus),
         default=ActionItemStatus.TODO,
-        nullable=False
+        nullable=False,
+        index=True
     )
     
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False
     )
 
     # Relationships
     meeting: Mapped["Meeting"] = relationship("Meeting", back_populates="action_items")
+
+    def __repr__(self) -> str:
+        return f"<ActionItem(id={self.id}, assignee='{self.assignee}', status='{self.status}')>"

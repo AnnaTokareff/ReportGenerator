@@ -1,5 +1,5 @@
 """
-API endpoints for meeting management.
+API endpoints for meeting management
 
 Endpoints:
 - POST /meetings/upload - uploading audio/video file and creating a meet
@@ -8,6 +8,8 @@ Endpoints:
 - GET /meetings/{id}/status - check status for processing
 - DELETE /meetings/{id} - delete meeting
 """
+
+import traceback
 from datetime import datetime
 
 from fastapi import (
@@ -26,14 +28,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user
-from app.db.session import get_db
+from app.core.config import settings
+from app.db.session import DatabaseSessionManager, get_db
 from app.models.meeting_models import (
+    ActionItem,
+    ActionItemPriority,
+    ActionItemStatus,
+    Decision,
     Meeting,
     MeetingStatus,
-    Transcription,
-    ActionItem,
-    Decision,
     MeetingTopic,
+    Transcription,
 )
 from app.models.user import User
 from app.schemas.meeting_schemas import (
@@ -48,121 +53,7 @@ from app.services.llm.analysis_service import get_analysis_service
 from app.services.analysis.report_service import get_report
 from app.utils.file_handler import save_audio_file, delete_audio_file
 
-from app.db.session import DatabaseSessionManager
-from app.core.config import settings
-
 router = APIRouter()
-
-async def process_meeting_transcript(meet_id: int, audio_path: str, lang: str | None = None) -> None:
-    """
-    Background task to process meeting: transcribe audio and analyze content.
-    
-    Steps:
-    1. Transcribe audio to text
-    2. Analyze transcription to extract topics, decisions, action items
-    3. Save everything to database
-    """
-    session_manager = DatabaseSessionManager(settings.DATABASE_URL)
-    async with session_manager.session() as db:
-        result = await db.execute(select(Meeting).where(Meeting.id == meet_id))
-        meet = result.scalar_one_or_none()
-        
-        if not meet:
-            return
-        
-        try:
-            # Check OpenAI API key before starting
-            if not settings.OPENAI_API_KEY:
-                raise ValueError("OpenAI API key not found. Please set OPENAI_API_KEY in .env file.")
-            
-            # Step 1: Start transcription
-            meet.status = MeetingStatus.PROCESSING
-            await db.commit()
-            
-            # Step 2: Transcribe audio
-            transcription_service = get_transcription_service()
-            transcription_result = await transcription_service.transcribe_audio(
-                audio_path=audio_path,
-                lang=lang
-            )
-            
-            transcription = Transcription(
-                meeting_id=meet_id,
-                full_text=transcription_result["text"],
-                language=transcription_result["language"],
-                segments=transcription_result.get("segments")
-            )
-            db.add(transcription)
-            await db.flush()  # Get transcription ID
-            
-            # Step 3: Analyze transcription
-            analysis_service = get_analysis_service()
-            analysis_result = await analysis_service.analyze_transcription(
-                transcription_text=transcription_result["text"],
-                lang=transcription_result["language"]
-            )
-            
-            if analysis_result.get("summary"):
-                transcription.summary = analysis_result["summary"]
-            
-            for topic_data in analysis_result.get("topics", []):
-                topic = MeetingTopic(
-                    meeting_id=meet_id,
-                    topic_name=topic_data.get("name", ""),
-                    relevance_score=topic_data.get("relevance_score", 1.0)
-                )
-                db.add(topic)
-            
-            for decision_data in analysis_result.get("decisions", []):
-                decision = Decision(
-                    meeting_id=meet_id,
-                    decision_text=decision_data.get("decision_text", ""),
-                    context=decision_data.get("context"),
-                    participants=decision_data.get("participants")
-                )
-                db.add(decision)
-            
-            from app.models.meeting_models import ActionItemPriority, ActionItemStatus
-            from datetime import datetime as dt
-            
-            for item_data in analysis_result.get("action_items", []):
-                due_date = None
-                if item_data.get("due_date"):
-                    try:
-                        due_date = dt.strptime(item_data["due_date"], "%Y-%m-%d")
-                    except (ValueError, TypeError):
-                        pass
-                
-                priority_map = {
-                    "low": ActionItemPriority.LOW,
-                    "medium": ActionItemPriority.MEDIUM,
-                    "high": ActionItemPriority.HIGH,
-                    "urgent": ActionItemPriority.URGENT
-                }
-                priority_str = item_data.get("priority", "medium").lower()
-                priority = priority_map.get(priority_str, ActionItemPriority.MEDIUM)
-                
-                action_item = ActionItem(
-                    meeting_id=meet_id,
-                    task_description=item_data.get("task_description", ""),
-                    assignee=item_data.get("assignee"),
-                    due_date=due_date,
-                    priority=priority,
-                    status=ActionItemStatus.TODO
-                )
-                db.add(action_item)
-            
-            meet.status = MeetingStatus.COMPLETED
-            meet.language = transcription_result["language"]
-            await db.commit()
-            print(f"Meeting {meet_id} processing completed successfully")
-
-        except Exception as e:
-            meet.status = MeetingStatus.FAILED
-            meet.error_message = str(e)
-            await db.commit()
-            print(f"Meeting {meet_id} processing failed: {e}")
-
 
 @router.post("/upload", response_model=MeetingUploadResponse, status_code=status.HTTP_201_CREATED)
 
@@ -174,37 +65,19 @@ async def upload_meeting(
     db: AsyncSession = Depends(get_db),
 ) -> MeetingUploadResponse:
     """
-    Upload audio file and create meeting.
+    Process:
+        1) Save uploaded file to disk
+        2) Create Meeting record with status=PENDING
+        3) Start background task for transcription
+        4)s Return meeting info immediately
     
-    Language is automatically detected by Whisper API.
-    
-    This endpoint:
-    1. Validates and saves the audio file
-    2. Creates meeting record in database
-    3. Starts background transcription task (with automatic language detection)
-    4. Returns immediately (doesn't wait for transcription)
-    
-    The user can poll GET /meetings/{id}/status to check progress.
-    
-    Args:
-        title: meeting title
-        file: audio or video file (mp3, wav, ogg, m4a, mp4, mov, avi, webm, mkv, etc.)
-               Whisper API automatically extracts audio from video files
-        current_user: authenticated user
-        db: db session
-        
-    Returns:
-        Meeting info with processing status
+    Use GET /meetings/{id}/status to check progress of transcription
     """
-    # Save audio file
     try:
         audio_path, duration, audio_format = await save_audio_file(file)
     except HTTPException:
-        # Re-raise HTTP exceptions as-is (they already have proper status codes)
         raise
     except Exception as e:
-        # Log the full error for debugging
-        import traceback
         error_details = traceback.format_exc()
         print(f"Error saving audio file: {error_details}")
         raise HTTPException(
@@ -212,8 +85,6 @@ async def upload_meeting(
             detail=f"Failed to save audio file: {str(e)}"
         )
     
-    # Create meeting record
-    # Language will be detected automatically during transcription
     try:
         meeting = Meeting(
             user_id=current_user.id,
@@ -221,7 +92,7 @@ async def upload_meeting(
             audio_file_path=audio_path,
             audio_duration=duration,
             audio_format=audio_format,
-            language=None,  # Will be set after transcription
+            language=None,
             status=MeetingStatus.PENDING
         )
         
@@ -229,26 +100,22 @@ async def upload_meeting(
         await db.commit()
         await db.refresh(meeting)
     except Exception as e:
-        # If database operation fails, try to clean up the saved file
-        import traceback
         error_details = traceback.format_exc()
-        print(f"Error creating meeting record: {error_details}")
+        print(f"Error while creating meeting record: {error_details}")
         try:
             delete_audio_file(audio_path)
-        except:
-            pass  # Ignore cleanup errors
+        except Exception:
+            pass
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create meeting record: {str(e)}"
         )
     
-    # Start background processing (transcription + analysis)
-    # Language will be detected automatically by Whisper
     background_tasks.add_task(
         process_meeting_transcript,
         meet_id=meeting.id,
         audio_path=audio_path,
-        lang=None  # Auto-detect language
+        lang=None
     )
     
     return MeetingUploadResponse(
@@ -257,27 +124,28 @@ async def upload_meeting(
         status=meeting.status,
         audio_file_path=meeting.audio_file_path,
         created_at=meeting.created_at,
-        message="Meeting uploaded successfully. Transcription is in progress..."
+        message="Meeting uploaded with success. Transcription is in progress..."
     )
 
 
 @router.get("", response_model=list[MeetingResponse])
+
 async def list_meetings(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[MeetingResponse]:
     """
-    Get list of all user's meetings.
+    List all meetings for the current user
     
-    Args:
-        current_user: Authenticated user
-        db: Database session
-        
-    Returns:
-        List of user's meetings
+    Returns meetings with:
+    - transcription
+    - topics
+    - decisions
+    - action items
+    
+    Ordered by creation date
     """
-    result = await db.execute(
-        select(Meeting)
+    result = await db.execute(select(Meeting)
         .options(
             selectinload(Meeting.transcription),
             selectinload(Meeting.topics),
@@ -289,6 +157,8 @@ async def list_meetings(
     )
     
     meetings = result.scalars().all()
+    
+    # convert models to pydantic schemas
     return [MeetingResponse.model_validate(meeting) for meeting in meetings]
 
 
@@ -298,17 +168,7 @@ async def get_meeting(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MeetingResponse:
-    """
-    Get meeting details with full transcription and analysis.
-    
-    Args:
-        meeting_id: meeting ID
-        current_user: Authenticated user
-        db: db session
-        
-    Returns:
-        full meeting data
-    """
+    """Get meeting details with transcription and analysis."""
     try:
         result = await db.execute(select(Meeting).options(
                 selectinload(Meeting.transcription),
@@ -326,30 +186,23 @@ async def get_meeting(
                 detail="Meeting not found"
             )
         
-        # Normalize JSON fields before validation to avoid serialization issues
-        # Fix participants if it's stored incorrectly
+        # fix: sometimes saved as dict instead of list
         if meeting.decisions:
             for decision in meeting.decisions:
                 if decision.participants is not None:
-                    # Ensure participants is a list, not dict
                     if isinstance(decision.participants, dict):
-                        # If it's a dict, try to convert (shouldn't happen, but just in case)
                         decision.participants = list(decision.participants.values()) if decision.participants else None
                     elif not isinstance(decision.participants, list):
                         decision.participants = None
         
-        # Ensure segments is properly formatted (can be list or dict)
+        # Check segments format
         if meeting.transcription and meeting.transcription.segments is not None:
-            # SQLAlchemy JSON field should already deserialize it, but ensure it's valid
             if not isinstance(meeting.transcription.segments, (list, dict)):
                 meeting.transcription.segments = None
         
-        # Validate and return meeting data
         try:
             return MeetingResponse.model_validate(meeting)
         except Exception as validation_error:
-            # Log validation error details
-            import traceback
             error_details = traceback.format_exc()
             print(f"Validation error for meeting {meeting_id}: {error_details}")
             print(f"Meeting data: id={meeting.id}, status={meeting.status}, has_transcription={meeting.transcription is not None}")
@@ -357,11 +210,8 @@ async def get_meeting(
                 print(f"Transcription: language={meeting.transcription.language}, segments_type={type(meeting.transcription.segments)}")
             raise
     except HTTPException:
-        # Re-raise HTTP exceptions as-is
         raise
     except Exception as e:
-        # Log the full error for debugging
-        import traceback
         error_details = traceback.format_exc()
         print(f"Error getting meeting {meeting_id}: {error_details}")
         raise HTTPException(
@@ -371,22 +221,12 @@ async def get_meeting(
 
 
 @router.get("/{meeting_id}/status", response_model=MeetingStatusResponse)
-async def get_meeting_status(
-    meeting_id: int,
+async def get_meeting_status( meeting_id: int,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MeetingStatusResponse:
-    """
-    Checking meet processing status.
-        
-    Args:
-        meeting_id: Meeting ID
-        current_user: Authenticated user
-        db: db session
-        
-    Returns:
-        Processing status
-    """
+    
+    """Check the status of the meeting """
     result = await db.execute(
         select(Meeting, Transcription)
         .outerjoin(Transcription)
@@ -404,13 +244,14 @@ async def get_meeting_status(
     meeting, transcription = row
     
     # progress
-    progress = None
     if meeting.status == MeetingStatus.PENDING:
         progress = 0
     elif meeting.status == MeetingStatus.PROCESSING:
         progress = 50
     elif meeting.status == MeetingStatus.COMPLETED:
         progress = 100
+    else:
+        progress = None
     
     return MeetingStatusResponse(
         id=meeting.id,
@@ -426,17 +267,7 @@ async def delete_meeting(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """
-    Delete meeting and associated data.
-    
-    1. Delete meeting from database 
-    2. Delete audio file from disk
-    
-    Args:
-        meeting_id: Meeting ID
-        current_user: Authenticated user
-        db: db session
-    """
+    """Delete meet and all related fields"""
     result = await db.execute(
         select(Meeting).where(Meeting.id == meeting_id, Meeting.user_id == current_user.id)
     )
@@ -449,7 +280,6 @@ async def delete_meeting(
             detail="Meeting not found"
         )
     
-    # Delete audio file
     audio_path = meeting.audio_file_path
     
     await db.execute(
@@ -460,19 +290,15 @@ async def delete_meeting(
     )
     await db.commit()
     
-    # Delete files from disk
     try:
         delete_audio_file(audio_path)
     except Exception as e:
-        # Log error but don't fail the request
         print(f"Warning: Failed to delete audio file {audio_path}: {e}")
     
-    # Delete report file if exists
     from app.utils.file_handler import delete_report_file
     try:
         delete_report_file(meeting_id)
     except Exception as e:
-        # Log error but don't fail the request
         print(f"Warning: Failed to delete report file for meeting {meeting_id}: {e}")
 
 
@@ -483,19 +309,7 @@ async def generate_meeting_report(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ReportResponse:
-    """
-    Generate meeting report in Markdown format.
-    
-    Args:
-        meeting_id: Meeting ID
-        request: Report generation options
-        current_user: Authenticated user
-        db: Database session
-        
-    Returns:
-        Markdown report content
-    """
-    # Get meeting with all relationships
+    """Generates meeting  report in md format"""
     result = await db.execute(
         select(Meeting)
         .options(
@@ -527,7 +341,6 @@ async def generate_meeting_report(
             detail="Meeting transcription not available"
         )
     
-    # Generate Markdown report
     report_service = get_report()
     markdown_content = await report_service.generate_markdown(
         meeting=meeting,
@@ -535,12 +348,10 @@ async def generate_meeting_report(
         include_timestamps=request.include_timestamps
     )
     
-    # Save report to disk
     from app.utils.file_handler import save_report_file
     try:
         report_file_path = save_report_file(meeting.id, markdown_content)
     except Exception as e:
-        # Log error but don't fail - report is still returned in response
         print(f"Warning: Failed to save report file: {e}")
         report_file_path = None
     
@@ -558,18 +369,7 @@ async def download_meeting_report(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> FileResponse:
-    """
-    Download meeting report as Markdown file.
-    
-    Args:
-        meeting_id: Meeting ID
-        current_user: Authenticated user
-        db: Database session
-        
-    Returns:
-        Markdown file download
-    """
-    # Verify meeting exists and belongs to user
+    """Download .md report"""
     result = await db.execute(
         select(Meeting).where(Meeting.id == meeting_id, Meeting.user_id == current_user.id)
     )
@@ -582,7 +382,6 @@ async def download_meeting_report(
             detail="Meeting not found"
         )
     
-    # Check if report file exists
     from app.utils.file_handler import REPORTS_DIR
     from pathlib import Path
     
@@ -592,7 +391,7 @@ async def download_meeting_report(
     if not report_path.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Report file not found. Please generate the report first."
+            detail="Report file not found. Please, generate the report."
         )
     
     return FileResponse(
@@ -600,3 +399,163 @@ async def download_meeting_report(
         filename=report_filename,
         media_type="text/markdown"
     )
+    
+async def process_meeting_transcript(meet_id: int, audio_path: str, lang: str | None = None) -> None:
+    """
+    Background task: transcribe audio and analyze transcription.
+    
+    This function runs asynchronously in the background after file upload.
+    1) Transcribe audio
+    2) Analyze transcription to extract topics, decisions, action items
+    3) Cache embeddings for semantic search
+    4) Change meeting status to COMPLETED
+    """
+    session_manager = DatabaseSessionManager(settings.DATABASE_URL)
+    async with session_manager.session() as db:
+        result = await db.execute(select(Meeting).where(Meeting.id == meet_id))
+        meet = result.scalar_one_or_none()
+        
+        if not meet:
+            return
+        
+        try:
+            if not settings.OPENAI_API_KEY:
+                raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY in .env file.")
+            
+            meet.status = MeetingStatus.PROCESSING
+            await db.commit()
+            
+            transcription_service = get_transcription_service()
+            transcription_result = await transcription_service.transcribe_audio(
+                audio_path=audio_path,
+                lang=lang
+            )
+            
+            # identify speakers using LLM if segments available
+            segments = transcription_result.get("segments")
+            if segments:
+                analysis_service = get_analysis_service()
+                try:
+                    segments = await analysis_service.identify_speakers(
+                        segments=segments,
+                        lang=transcription_result["language"]
+                    )
+                    print(f"Identified speakers for meeting {meet_id}")
+                except Exception as e:
+                    print(f"Warning: Speaker identification failed: {e}. Using segments without speaker labels.")
+                    segments = transcription_result.get("segments")
+            
+            transcription = Transcription(
+                meeting_id=meet_id,
+                full_text=transcription_result["text"],
+                language=transcription_result["language"],
+                segments=segments
+            )
+            db.add(transcription)
+            await db.flush()
+            
+            analysis_service = get_analysis_service()
+            analysis_result = await analysis_service.analyze_transcription(
+                transcription_text=transcription_result["text"],
+                lang=transcription_result["language"]
+            )
+            
+            if analysis_result.get("summary"):
+                transcription.summary = analysis_result["summary"]
+            
+            for topic_data in analysis_result.get("topics", []):
+                topic = MeetingTopic(
+                    meeting_id=meet_id,
+                    topic_name=topic_data.get("name", ""),
+                    relevance_score=topic_data.get("relevance_score", 1.0)
+                )
+                db.add(topic)
+            
+            for decision_data in analysis_result.get("decisions", []):
+                decision = Decision(
+                    meeting_id=meet_id,
+                    decision_text=decision_data.get("decision_text", ""),
+                    context=decision_data.get("context"),
+                    participants=decision_data.get("participants")
+                )
+                db.add(decision)
+            
+            for item_data in analysis_result.get("action_items", []):
+                due_date = None
+                if item_data.get("due_date"):
+                    try:
+                        due_date = datetime.strptime(item_data["due_date"], "%Y-%m-%d")
+                    except (ValueError, TypeError):
+                        pass
+                
+                priority_map = {
+                    "low": ActionItemPriority.LOW,
+                    "medium": ActionItemPriority.MEDIUM,
+                    "high": ActionItemPriority.HIGH,
+                    "urgent": ActionItemPriority.URGENT
+                }
+                priority_str = item_data.get("priority", "medium").lower()
+                priority = priority_map.get(priority_str, ActionItemPriority.MEDIUM)
+                
+                action_item = ActionItem(
+                    meeting_id=meet_id,
+                    task_description=item_data.get("task_description", ""),
+                    assignee=item_data.get("assignee"),
+                    due_date=due_date,
+                    priority=priority,
+                    status=ActionItemStatus.TODO
+                )
+                db.add(action_item)
+            
+            meet.status = MeetingStatus.COMPLETED
+            meet.language = transcription_result["language"]
+            await db.commit()
+            
+            # cache embeddings
+            try:
+                import pickle
+                
+                from app.models.meeting_models import TranscriptionChunk
+                from app.services.search.embedding_service import (
+                    chunk_text,
+                    get_embeddings,
+                )
+                
+                transcription_text = transcription.full_text
+                
+                # For very long transcriptions (>100k chars), limit chunks to avoid memory issues
+                max_chunks = None
+                if len(transcription_text) > 100_000:
+                    max_chunks = 500  # Limit to 500 chunks for very long transcriptions
+                    print(f"Long transcription detected ({len(transcription_text)} chars), limiting to {max_chunks} chunks")
+                
+                chunks = chunk_text(transcription_text, chunk_size=500, overlap=50, max_chunks=max_chunks)
+                
+                if chunks:
+                    print(f"Generating embeddings for {len(chunks)} chunks...")
+                    chunk_embeddings = get_embeddings(chunks, batch_size=100)
+                    
+                    for idx, (chunk_text_item, embedding) in enumerate(zip(chunks, chunk_embeddings)):
+                        
+                        embedding_bytes = pickle.dumps(embedding)
+                        
+                        chunk_record = TranscriptionChunk(
+                            transcription_id=transcription.id,
+                            chunk_index=idx,
+                            chunk_text=chunk_text_item,
+                            embedding=embedding_bytes,
+                        )
+                        db.add(chunk_record)
+                    
+                    await db.commit()
+                    print(f"Cached {len(chunks)} chunks for meet {meet_id}")
+            except Exception as e:
+                print(f"Warning: Failed to cache embeddings for meet {meet_id}: {e}")
+            
+            print(f"Meeting {meet_id} processing completed!")
+
+        except Exception as e:
+            meet.status = MeetingStatus.FAILED
+            meet.error_message = str(e)
+            await db.commit()
+            print(f"Meeting {meet_id} processing failed: {e}")

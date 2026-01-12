@@ -1,6 +1,15 @@
-import os
+"""
+Meeting analysis service using OpenAI GPT.
+
+Extracts structured information from meeting transcriptions:
+- Summary
+- Topics with relevance scores
+- Decisions made
+- Action items with assignees and due dates
+"""
 import json
-from typing import Optional, Dict, Any
+import os
+from typing import Any, Dict, Optional
 
 from openai import AsyncOpenAI
 

@@ -1,10 +1,18 @@
-version: "3.8"
-
 services:
   web:
     build: .
     command: ./start.sh
     volumes:
       - .:/app
+      - uploads_data:/app/uploads
+      - reports_data:/app/reports
     ports:
       - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+
+volumes:
+  uploads_data:
+  reports_data:

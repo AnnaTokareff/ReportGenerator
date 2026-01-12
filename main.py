@@ -2,6 +2,10 @@
 FastAPI application main entry point.
 """
 
+import bcrypt
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,10 +15,7 @@ from app.api.health import router as health_router
 from app.api.meetings_api import router as meetings_router
 from app.api.support_api import router as support_router
 from app.core.config import settings
-from typing import AsyncGenerator
 from app.db.session import sessionmanager
-from contextlib import asynccontextmanager
-import bcrypt
 
 # ref-issue: https://github.com/pyca/bcrypt/issues/684
 if not hasattr(bcrypt, "__about__"):
@@ -40,6 +41,7 @@ app = FastAPI(
     openapi_url=f"{settings.API_PREFIX}/openapi.json",
     docs_url=f"{settings.API_PREFIX}/docs",
     redoc_url=f"{settings.API_PREFIX}/redoc",
+    lifespan=lifespan,
 )
 
 # Set up CORS
