@@ -2,9 +2,6 @@
 """
 Script to clear the database from test data.
 
-WARNING:
-This script deletes ALL data from the database.
-Use only in development or testing environments.
 """
 
 import asyncio
@@ -36,7 +33,7 @@ async def clear_all_data():
 
     async with sessionmanager.session() as db:
         try:
-            # Delete dependent tables first
+            #  dependent tables first
             print("Deleting action items...")
             await db.execute(delete(ActionItem))
 
@@ -70,9 +67,9 @@ async def clear_all_data():
 
 
 async def clear_only_meetings():
-    """Remove meeting-related data only."""
-    print("WARNING: This will delete ALL meetings.")
-    print("Users will NOT be deleted.")
+    """Remove meeting-related data only"""
+    print("WARNING: This will delete ALL meetings")
+    print("Users will NOT be deleted")
 
     response = input("Are you sure? Type 'yes' to continue: ")
     if response.lower() != "yes":
