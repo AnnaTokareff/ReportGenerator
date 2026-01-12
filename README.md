@@ -549,7 +549,7 @@ Apply migrations:
 alembic upgrade head
 ```
 
-## 🔧 Quick Pipeline Execution
+## Quick Pipeline Execution
 
 **Easiest way** - use the automated Python script:
 
@@ -569,6 +569,45 @@ The script automatically handles: registration, login, upload, processing wait, 
 - OpenAI API key
 - (Optional) Docker and Docker Compose
 - (Optional) ffmpeg for local installation
+
+## Future Improvements 
+
+This project has a solid foundation and can be extended with the following improvements:
+
+### Database & Storage
+- **Vector Database Integration**: Replace in-memory embeddings with a dedicated vector database (Pinecone, Weaviate, Qdrant, or Chroma) for better scalability and performance
+
+### Speaker Diarization
+- **Advanced Speaker Diarization**: Implement pyannote.audio or similar libraries for more accurate speaker separation (GPU needed)
+- **Speaker Identification**: Add speaker name mapping and persistent speaker profiles across meetings
+
+### AI & Agentic Capabilities
+- **Agentic AI Framework**: Implement autonomous agents that can:
+  - Generate meeting summaries and send them via email
+  - Create calendar events from decisions and action items
+  - Suggest agenda items based on previous meetings
+- **Tool Calling**: Enable agents to interact with external APIs (calendar, email, task management)
+
+### Enhanced RAG
+- **Hybrid Search**: Combine semantic search with keyword search for better retrieval
+- **Query Rewriting**: Use LLM to rewrite user queries for better search results
+- **Contextual Memory**: Maintain conversation context across multiple queries
+
+## Requirements
+
+- Python 3.11+
+- OpenAI API key
+- (Optional) Docker and Docker Compose
+- (Optional) ffmpeg for local installation
+
+## 📄 License
+
+MIT
+
+**Version**: 0.1.0
+
+**Last Updated**: January 2025
+
 
 ## License
 
