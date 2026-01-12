@@ -330,7 +330,32 @@ else:
         if not meetings:
             st.info("No completed meetings available")
         else:
-            question = st.text_area("Your question")
+            # Initialize session state for chat history
+            if "chat_history" not in st.session_state:
+                st.session_state.chat_history = []
+            
+            # Display chat history
+            if st.session_state.chat_history:
+                st.subheader("Conversation")
+                for i, (q, a, conf) in enumerate(st.session_state.chat_history):
+                    with st.expander(f"Q: {q[:50]}..." if len(q) > 50 else f"Q: {q}", expanded=(i == len(st.session_state.chat_history) - 1)):
+                        st.markdown(f"**Question:** {q}")
+                        st.markdown(f"**Answer:** {a}")
+                        if conf is not None:
+                            st.caption(f"Confidence: {conf:.1%}")
+                
+                if st.button("Clear conversation"):
+                    st.session_state.chat_history = []
+                    st.rerun()
+            
+            st.divider()
+            
+            # Question input
+            question = st.text_area(
+                "Your question",
+                placeholder="e.g., Who attended the meeting? What decisions were made? When is the deadline?",
+                key="question_input"
+            )
 
             meeting_map = {
                 f"{m['title']} (ID {m['id']})": m["id"] for m in meetings
@@ -338,17 +363,25 @@ else:
             selected = st.multiselect(
                 "Limit search to meetings (optional)",
                 options=list(meeting_map.keys()),
+                help="Leave empty to search all meetings"
             )
             meeting_ids = [meeting_map[k] for k in selected] if selected else None
 
-            if st.button("Search"):
+            search_button = st.button("Search", type="primary")
+
+            if search_button:
                 if question:
-                    with st.spinner("Searching..."):
+                    with st.spinner("Searching through meetings..."):
                         result = query_support(question, meeting_ids)
 
                     if result:
-                        st.subheader("Answer")
-                        st.write(result.get("answer"))
+                        answer = result.get("answer", "")
+                        confidence = result.get("confidence", 0.0)
+                        
+                        # Add to chat history
+                        st.session_state.chat_history.append((question, answer, confidence))
+                        
+                        st.rerun()
                 else:
                     st.warning("Please enter a question")
 
