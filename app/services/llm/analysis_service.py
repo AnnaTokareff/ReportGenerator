@@ -34,9 +34,11 @@ class MeetingAnalysisService:
                                     segments: Optional[list] = None) -> Dict[str, Any]:
         """Analyze transcription and extract summary, topics, decisions, and action items"""
         
+        print(f"[Analysis Service] Starting analysis: {len(transcription_text)} characters, language={lang}")
         prompt = self._build_analysis_prompt(transcription_text, lang)
         
         try:
+            print(f"[Analysis Service] Calling LLM ({self.model}) for analysis...")
             response = await self.client.chat.completions.create(
                 model=self.model, messages=[
                     {"role": "system", "content": self._get_system_prompt(lang)},
@@ -48,6 +50,13 @@ class MeetingAnalysisService:
             
             result_json = json.loads(response.choices[0].message.content)
             
+            topics_count = len(result_json.get("topics", []))
+            decisions_count = len(result_json.get("decisions", []))
+            action_items_count = len(result_json.get("action_items", []))
+            has_summary = bool(result_json.get("summary", ""))
+            
+            print(f"[Analysis Service] Analysis completed: {topics_count} topics, {decisions_count} decisions, {action_items_count} action items, summary={'yes' if has_summary else 'no'}")
+            
             return {
                 "summary": result_json.get("summary", ""),
                 "topics": result_json.get("topics", []),
@@ -56,8 +65,10 @@ class MeetingAnalysisService:
             }
             
         except json.JSONDecodeError as e:
+            print(f"[Analysis Service] Error: Failed to parse LLM response: {str(e)}")
             raise Exception(f"Failed to parse LLM response: {str(e)}")
         except Exception as e:
+            print(f"[Analysis Service] Error: Analysis failed: {str(e)}")
             raise Exception(f"Analysis failed: {str(e)}")
     
     async def identify_speakers(self, segments: list[Dict[str, Any]], lang: str = "en") -> list[Dict[str, Any]]:
@@ -73,6 +84,8 @@ class MeetingAnalysisService:
         """
         if not segments or len(segments) == 0:
             return segments
+        
+        print(f"[Analysis Service] Identifying speakers for {len(segments)} segments...")
         
         # Format segments for LLM
         segments_text = "\n".join([
@@ -108,6 +121,7 @@ class MeetingAnalysisService:
                     Index corresponds to the segment order (0 = first segment, 1 = second, etc.)."""
 
         try:
+            print(f"[Analysis Service] Calling LLM ({self.model}) for speaker identification...")
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[

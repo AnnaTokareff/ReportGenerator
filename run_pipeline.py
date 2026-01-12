@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 """
-Automatic script to run the full meeting processing pipeline.
-
 Usage:
     python run_pipeline.py --file meeting.mp3 --title "Team Meeting"
     python run_pipeline.py --file meeting.mp4 --title "Video Meeting" --username testuser
@@ -17,17 +15,13 @@ import httpx
 
 
 class MeetingPipeline:
-    """Helper class to run the meeting processing pipeline."""
-
     def __init__(self, base_url: str = "http://localhost:8000"):
-        """Initialize pipeline client."""
         self.base_url = base_url
         self.client = httpx.Client(timeout=300.0)
         self.token: Optional[str] = None
         self.username: Optional[str] = None
 
     def register(self, username: str, password: str) -> bool:
-        """Register a new user."""
         print(f"Registering user: {username}...")
         try:
             response = self.client.post(
@@ -40,7 +34,6 @@ class MeetingPipeline:
                 return True
 
             if response.status_code == 400:
-                # User already exists — this is fine
                 print("User already exists, continuing")
                 return True
 
@@ -52,7 +45,6 @@ class MeetingPipeline:
             return False
 
     def login(self, username: str, password: str) -> bool:
-        """Log in user and get access token."""
         print(f"Logging in as {username}...")
         try:
             response = self.client.post(
@@ -75,7 +67,7 @@ class MeetingPipeline:
             return False
 
     def upload_file(self, file_path: str, title: str) -> Optional[int]:
-        """Upload audio or video file."""
+        """Upload audio or video file"""
         file = Path(file_path)
         if not file.exists():
             print(f"File not found: {file_path}")
@@ -86,7 +78,6 @@ class MeetingPipeline:
 
         if size_mb > 25:
             print("Warning: file size exceeds 25 MB Whisper API limit")
-            print("Consider compressing or splitting the file")
             response = input("Continue anyway? (y/n): ")
             if response.lower() != "y":
                 return None
@@ -113,7 +104,6 @@ class MeetingPipeline:
             return None
 
     def wait_for_completion(self, meeting_id: int, interval: int = 5) -> bool:
-        """Wait until meeting processing is finished."""
         print(f"Waiting for processing to complete (meeting {meeting_id})")
 
         headers = {"Authorization": f"Bearer {self.token}"}
@@ -153,7 +143,6 @@ class MeetingPipeline:
                 time.sleep(interval)
 
     def get_results(self, meeting_id: int) -> Optional[dict]:
-        """Fetch processing results."""
         print(f"Fetching results for meeting {meeting_id}")
 
         try:

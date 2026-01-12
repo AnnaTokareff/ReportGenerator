@@ -54,10 +54,12 @@ def get_embeddings(texts: List[str], batch_size: int = 100) -> np.ndarray:
     if not texts:
         return np.array([])
     
+    print(f"[Embedding Service] Generating embeddings for {len(texts)} texts...")
     model = get_embedding_model()
     
     if len(texts) <= batch_size:
         embeddings = model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
+        print(f"[Embedding Service] Embeddings generated successfully")
         return embeddings
     
     all_embeddings = []
@@ -72,7 +74,9 @@ def get_embeddings(texts: List[str], batch_size: int = 100) -> np.ndarray:
         if num_batches > 1:
             print(f"Processed embedding batch {batch_num}/{num_batches} ({len(batch)} texts)")
     
-    return np.vstack(all_embeddings)
+    result = np.vstack(all_embeddings)
+    print(f"[Embedding Service] All embeddings generated successfully ({len(texts)} total)")
+    return result
 
 
 def get_embedding(text: str) -> np.ndarray:

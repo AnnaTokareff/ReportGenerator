@@ -1,5 +1,5 @@
 """
-Streamlit web interface for Meeting Reporter.
+Streamlit web interface for Meeting Reporter
 
 Simple interface for:
 - Uploading audio/video files
@@ -50,15 +50,20 @@ def make_request(method: str, endpoint: str, **kwargs) -> Optional[dict]:
             if response.status_code in (200, 201):
                 return response.json()
 
-            st.error(f"API error {response.status_code}: {response.text}")
+            try:
+                error_data = response.json()
+                error_detail = error_data.get("detail", response.text)
+                st.error(f"Error: {error_detail}")
+            except:
+                st.error(f"API error {response.status_code}: {response.text}")
             return None
 
     except httpx.ConnectError as e:
-        st.error(f"Не удалось подключиться к API. Убедитесь, что сервер запущен на {API_BASE_URL}")
-        st.error(f"Ошибка: {e}")
+        st.error(f"Couldn't connect to API. Make sure {API_BASE_URL} exists")
+        st.error(f"Error: {e}")
         return None
     except Exception as e:
-        st.error(f"Ошибка соединения: {e}")
+        st.error(f"Connection error: {e}")
         return None
 
 
@@ -227,48 +232,51 @@ else:
             st.info(f"File: {uploaded_file.name} ({size_mb:.2f} MB)")
 
             if size_mb > 25:
-                st.warning("File exceeds 25 MB limit")
-            else:
-                title = st.text_input(
-                    "Meeting title",
-                    value=uploaded_file.name.rsplit(".", 1)[0],
-                )
+                st.info("File exceeds 25 MB. It will be automatically compressed before processing.")
+            elif size_mb > 20:
+                st.info("File is large. It may be compressed automatically if needed.")
 
-                if st.button("Upload and process"):
-                    with st.spinner("Uploading file..."):
-                        meeting_id = upload_file(uploaded_file, title)
+            title = st.text_input(
+                "Meeting title",
+                value=uploaded_file.name.rsplit(".", 1)[0],
+            )
 
-                    if meeting_id:
-                        st.success(f"File uploaded. Meeting ID: {meeting_id}")
+            if st.button("Upload and process"):
+                with st.spinner("Uploading file..."):
+                    meeting_id = upload_file(uploaded_file, title)
 
-                        progress = st.progress(0)
-                        status_text = st.empty()
+                if meeting_id:
+                    st.success(f"File uploaded. Meeting ID: {meeting_id}")
 
-                        while True:
-                            status_data = get_meeting_status(meeting_id)
-                            if not status_data:
-                                break
+                    progress = st.progress(0)
+                    status_text = st.empty()
+                    status = "unknown"
 
-                            status = status_data.get("status", "unknown")
-                            message = status_data.get("message", "")
-                            status_text.text(f"Status: {status} {message}")
+                    while True:
+                        status_data = get_meeting_status(meeting_id)
+                        if not status_data:
+                            break
 
-                            if status == "completed":
-                                progress.progress(100)
-                                st.success("Processing completed")
-                                break
-                            elif status == "failed":
-                                st.error(status_data.get("error_message", "Processing failed"))
-                                break
-                            elif status == "processing":
-                                progress.progress(50)
-                            else:
-                                progress.progress(10)
-
-                            time.sleep(2)
+                        status = status_data.get("status", "unknown")
+                        message = status_data.get("message", "")
+                        status_text.text(f"Status: {status} {message}")
 
                         if status == "completed":
-                            st.info("See results in the 'My Meetings' tab")
+                            progress.progress(100)
+                            st.success("Processing completed")
+                            break
+                        elif status == "failed":
+                            st.error(status_data.get("error_message", "Processing failed"))
+                            break
+                        elif status == "processing":
+                            progress.progress(50)
+                        else:
+                            progress.progress(10)
+
+                        time.sleep(2)
+
+                    if status == "completed":
+                        st.info("See results in the 'My Meetings' tab")
 
     # My meetings tab
     with tab_meetings:
@@ -330,11 +338,10 @@ else:
         if not meetings:
             st.info("No completed meetings available")
         else:
-            # Initialize session state for chat history
             if "chat_history" not in st.session_state:
                 st.session_state.chat_history = []
             
-            # Display chat history
+            #  chat history
             if st.session_state.chat_history:
                 st.subheader("Conversation")
                 for i, (q, a, conf) in enumerate(st.session_state.chat_history):
@@ -370,22 +377,24 @@ else:
             search_button = st.button("Search", type="primary")
 
             if search_button:
-                if question:
+                if question and question.strip():
                     with st.spinner("Searching through meetings..."):
-                        result = query_support(question, meeting_ids)
+                        result = query_support(question.strip(), meeting_ids)
 
                     if result:
                         answer = result.get("answer", "")
                         confidence = result.get("confidence", 0.0)
                         
-                        # Add to chat history
-                        st.session_state.chat_history.append((question, answer, confidence))
+                        #  to chat history
+                        st.session_state.chat_history.append((question.strip(), answer, confidence))
                         
+                        st.success("Answer found!")
                         st.rerun()
+                    else:
+                        st.error("Failed to get answer. Please try again.")
                 else:
                     st.warning("Please enter a question")
 
-    # About tab
     with tab_about:
         st.header("About")
         st.markdown(

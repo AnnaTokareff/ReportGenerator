@@ -10,7 +10,7 @@ Endpoints:
 """
 
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import (
     APIRouter,
@@ -74,7 +74,9 @@ async def upload_meeting(
     Use GET /meetings/{id}/status to check progress of transcription
     """
     try:
+        print(f"[Meeting Upload] Starting file upload: {file.filename} (user: {current_user.username})")
         audio_path, duration, audio_format = await save_audio_file(file)
+        print(f"[Meeting Upload] File saved successfully: {audio_path} ({duration:.1f}s, {audio_format})")
     except HTTPException:
         raise
     except Exception as e:
@@ -86,6 +88,7 @@ async def upload_meeting(
         )
     
     try:
+        now = datetime.now(timezone.utc)
         meeting = Meeting(
             user_id=current_user.id,
             title=title,
@@ -93,12 +96,15 @@ async def upload_meeting(
             audio_duration=duration,
             audio_format=audio_format,
             language=None,
-            status=MeetingStatus.PENDING
+            status=MeetingStatus.PENDING,
+            created_at=now,
+            updated_at=now
         )
         
         db.add(meeting)
         await db.commit()
         await db.refresh(meeting)
+        print(f"[Meeting Upload] Created meeting record: ID={meeting.id}, title='{meeting.title}', status={meeting.status}")
     except Exception as e:
         error_details = traceback.format_exc()
         print(f"Error while creating meeting record: {error_details}")
@@ -117,6 +123,7 @@ async def upload_meeting(
         audio_path=audio_path,
         lang=None
     )
+    print(f"[Meeting Upload] Background task started for meeting {meeting.id}")
     
     return MeetingUploadResponse(
         id=meeting.id,
@@ -262,11 +269,8 @@ async def get_meeting_status( meeting_id: int,
     )
     
 @router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_meeting(
-    meeting_id: int,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> None:
+async def delete_meeting(meeting_id: int, current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),) -> None:
     """Delete meet and all related fields"""
     result = await db.execute(
         select(Meeting).where(Meeting.id == meeting_id, Meeting.user_id == current_user.id)
@@ -416,20 +420,37 @@ async def process_meeting_transcript(meet_id: int, audio_path: str, lang: str | 
         meet = result.scalar_one_or_none()
         
         if not meet:
+            print(f"[Meeting {meet_id}] Meeting not found, skipping processing")
             return
+        
+        #  if already processed or processing
+        if meet.status == MeetingStatus.COMPLETED:
+            print(f"[Meeting {meet_id}] Already completed, skipping processing")
+            return
+        
+        if meet.status == MeetingStatus.PROCESSING:
+            print(f"[Meeting {meet_id}] Already processing, skipping duplicate task")
+            return
+        
+        if meet.status == MeetingStatus.FAILED:
+            print(f"[Meeting {meet_id}] Previous attempt failed, retrying...")
         
         try:
             if not settings.OPENAI_API_KEY:
                 raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY in .env file.")
             
+            print(f"[Meeting {meet_id}] Starting processing pipeline...")
             meet.status = MeetingStatus.PROCESSING
             await db.commit()
+            print(f"[Meeting {meet_id}] Status set to PROCESSING")
             
+            print(f"[Meeting {meet_id}] Starting transcription...")
             transcription_service = get_transcription_service()
             transcription_result = await transcription_service.transcribe_audio(
                 audio_path=audio_path,
                 lang=lang
             )
+            print(f"[Meeting {meet_id}] Transcription completed: {len(transcription_result['text'])} characters, language={transcription_result['language']}")
             
             # identify speakers using LLM if segments available
             segments = transcription_result.get("segments")
@@ -445,14 +466,17 @@ async def process_meeting_transcript(meet_id: int, audio_path: str, lang: str | 
                     print(f"Warning: Speaker identification failed: {e}. Using segments without speaker labels.")
                     segments = transcription_result.get("segments")
             
+            now = datetime.now(timezone.utc)
             transcription = Transcription(
                 meeting_id=meet_id,
                 full_text=transcription_result["text"],
                 language=transcription_result["language"],
-                segments=segments
+                segments=segments,
+                created_at=now
             )
             db.add(transcription)
             await db.flush()
+            print(f"[Meeting {meet_id}] Transcription saved to database")
             
             analysis_service = get_analysis_service()
             analysis_result = await analysis_service.analyze_transcription(
@@ -467,7 +491,8 @@ async def process_meeting_transcript(meet_id: int, audio_path: str, lang: str | 
                 topic = MeetingTopic(
                     meeting_id=meet_id,
                     topic_name=topic_data.get("name", ""),
-                    relevance_score=topic_data.get("relevance_score", 1.0)
+                    relevance_score=topic_data.get("relevance_score", 1.0),
+                    created_at=now
                 )
                 db.add(topic)
             
@@ -476,7 +501,8 @@ async def process_meeting_transcript(meet_id: int, audio_path: str, lang: str | 
                     meeting_id=meet_id,
                     decision_text=decision_data.get("decision_text", ""),
                     context=decision_data.get("context"),
-                    participants=decision_data.get("participants")
+                    participants=decision_data.get("participants"),
+                    created_at=now
                 )
                 db.add(decision)
             
@@ -503,19 +529,19 @@ async def process_meeting_transcript(meet_id: int, audio_path: str, lang: str | 
                     assignee=item_data.get("assignee"),
                     due_date=due_date,
                     priority=priority,
-                    status=ActionItemStatus.TODO
+                    status=ActionItemStatus.TODO,
+                    created_at=now,
+                    updated_at=now
                 )
                 db.add(action_item)
             
-            meet.status = MeetingStatus.COMPLETED
-            meet.language = transcription_result["language"]
-            await db.commit()
-            
-            # cache embeddings
+            # cache embeddings before changing status to COMPLETED
+            # Generate embeddings OUTSIDE of database session context to avoid greenlet issues
+            chunk_records_data = []
             try:
                 import pickle
+                import asyncio
                 
-                from app.models.meeting_models import TranscriptionChunk
                 from app.services.search.embedding_service import (
                     chunk_text,
                     get_embeddings,
@@ -523,39 +549,63 @@ async def process_meeting_transcript(meet_id: int, audio_path: str, lang: str | 
                 
                 transcription_text = transcription.full_text
                 
-                # For very long transcriptions (>100k chars), limit chunks to avoid memory issues
                 max_chunks = None
                 if len(transcription_text) > 100_000:
                     max_chunks = 500  # Limit to 500 chunks for very long transcriptions
-                    print(f"Long transcription detected ({len(transcription_text)} chars), limiting to {max_chunks} chunks")
+                    print(f"[Meeting {meet_id}] Long transcription detected ({len(transcription_text)} chars), limiting to {max_chunks} chunks")
                 
                 chunks = chunk_text(transcription_text, chunk_size=500, overlap=50, max_chunks=max_chunks)
                 
                 if chunks:
-                    print(f"Generating embeddings for {len(chunks)} chunks...")
-                    chunk_embeddings = get_embeddings(chunks, batch_size=100)
+                    print(f"[Meeting {meet_id}] Generating embeddings for {len(chunks)} chunks...")
+                    # Generate embeddings in thread pool - completely outside DB session context
+                    chunk_embeddings = await asyncio.to_thread(get_embeddings, chunks, 100)
                     
+                    # Prepare all chunk data BEFORE adding to session
                     for idx, (chunk_text_item, embedding) in enumerate(zip(chunks, chunk_embeddings)):
-                        
                         embedding_bytes = pickle.dumps(embedding)
-                        
-                        chunk_record = TranscriptionChunk(
-                            transcription_id=transcription.id,
-                            chunk_index=idx,
-                            chunk_text=chunk_text_item,
-                            embedding=embedding_bytes,
-                        )
+                        chunk_records_data.append({
+                            'transcription_id': transcription.id,
+                            'chunk_index': idx,
+                            'chunk_text': chunk_text_item,
+                            'embedding': embedding_bytes,
+                            'created_at': now
+                        })
+                    
+                    print(f"[Meeting {meet_id}] Prepared {len(chunk_records_data)} chunk records")
+            except Exception as e:
+                print(f"[Meeting {meet_id}] Warning: Failed to generate embeddings: {e}")
+                import traceback
+                print(f"[Meeting {meet_id}] Embedding error details: {traceback.format_exc()}")
+            
+            # Now add chunks to session (only if generation was successful)
+            if chunk_records_data:
+                try:
+                    from app.models.meeting_models import TranscriptionChunk
+                    for chunk_data in chunk_records_data:
+                        chunk_record = TranscriptionChunk(**chunk_data)
                         db.add(chunk_record)
                     
-                    await db.commit()
-                    print(f"Cached {len(chunks)} chunks for meet {meet_id}")
-            except Exception as e:
-                print(f"Warning: Failed to cache embeddings for meet {meet_id}: {e}")
+                    await db.flush()  # Flush chunks before final commit
+                    print(f"[Meeting {meet_id}] Cached {len(chunk_records_data)} chunks")
+                except Exception as e:
+                    print(f"[Meeting {meet_id}] Warning: Failed to save chunks to database: {e}")
+            
+            # Now commit everything together: transcription, analysis results, and embeddings
+            meet.status = MeetingStatus.COMPLETED
+            meet.language = transcription_result["language"]
+            await db.commit()
+            print(f"[Meeting {meet_id}] Status set to COMPLETED")
             
             print(f"Meeting {meet_id} processing completed!")
 
         except Exception as e:
-            meet.status = MeetingStatus.FAILED
-            meet.error_message = str(e)
-            await db.commit()
-            print(f"Meeting {meet_id} processing failed: {e}")
+            try:
+                await db.rollback()
+                meet.status = MeetingStatus.FAILED
+                meet.error_message = str(e)
+                await db.commit()
+                print(f"[Meeting {meet_id}] Processing failed: {e}")
+            except Exception as commit_error:
+                print(f"[Meeting {meet_id}] Error updating status to FAILED: {commit_error}")
+                print(f"[Meeting {meet_id}] Original error: {e}")

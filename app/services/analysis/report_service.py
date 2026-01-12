@@ -109,32 +109,39 @@ class ReportService:
             lines.append("## Full Transcription")
             lines.append("")
             
-            if include_timestamps and meeting.transcription.segments:
-                # Include segments with timestamps and speaker grouping
-                segments = meeting.transcription.segments
-                if isinstance(segments, list):
-                    current_speaker = None
-                    for segment in segments:
-                        start = segment.get("start", 0)
-                        end = segment.get("end", 0)
-                        text = segment.get("text", "")
-                        speaker = segment.get("speaker")  
-                        
-                        # Group by speaker
-                        if speaker and speaker != current_speaker:
-                            lines.append("")
-                            lines.append(f"### {speaker}")
-                            lines.append("")
-                            current_speaker = speaker
-                        
-                        if speaker:
-                            lines.append(f"[{start:.1f}s - {end:.1f}s] {text}")
-                        else:
-                            lines.append(f"[{start:.1f}s - {end:.1f}s] {text}")
-                else:
-                    lines.append(meeting.transcription.full_text)
+            # Check if we have segments with speakers
+            segments = meeting.transcription.segments
+            has_speakers = False
+            if segments and isinstance(segments, list):
+                # Check if any segment has a speaker label
+                has_speakers = any(seg.get("speaker") for seg in segments if isinstance(seg, dict))
+            
+            if (include_timestamps or has_speakers) and segments and isinstance(segments, list):
+                # Include segments with timestamps and/or speaker grouping
+                current_speaker = None
+                for segment in segments:
+                    if not isinstance(segment, dict):
+                        continue
+                    
+                    start = segment.get("start", 0)
+                    end = segment.get("end", 0)
+                    text = segment.get("text", "")
+                    speaker = segment.get("speaker")
+                    
+                    # Group by speaker (show speaker even without timestamps)
+                    if speaker and speaker != current_speaker:
+                        lines.append("")
+                        lines.append(f"### {speaker}")
+                        lines.append("")
+                        current_speaker = speaker
+                    
+                    # Include timestamps only if requested
+                    if include_timestamps:
+                        lines.append(f"[{start:.1f}s - {end:.1f}s] {text}")
+                    else:
+                        lines.append(text)
             else:
-                #  full text
+                # Just full text without segments
                 lines.append(meeting.transcription.full_text)
             
             lines.append("")

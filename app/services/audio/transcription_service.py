@@ -48,11 +48,14 @@ class TranscriptionService:
         timeout_seconds = max(120.0, file_size_mb * 30.0)  
         timeout_seconds = min(timeout_seconds, 600.0)  # maximum 10 minutes
         
-        print(f"Transcribing file ({file_size_mb:.2f} MB), timeout: {timeout_seconds:.0f} seconds...")
+        print(f"[Transcription Service] Starting transcription: {file_size_mb:.2f} MB, timeout: {timeout_seconds:.0f} seconds...")
         
         last_error = None
         for attempt in range(max_retries):
             try:
+                if attempt > 0:
+                    print(f"[Transcription Service] Retry attempt {attempt + 1}/{max_retries} (previous attempt failed)...")
+                
                 with open(file_path, "rb") as audio_file:
                     request_params = {
                         "model": self.model,
@@ -66,27 +69,30 @@ class TranscriptionService:
                     if prompt:
                         request_params["prompt"] = prompt
                     
-                    if attempt > 0:
-                        print(f"Retry attempt {attempt + 1}/{max_retries}...")
-                    
                     response = await asyncio.wait_for(
                         self.client.audio.transcriptions.create(**request_params),
                         timeout=timeout_seconds
                     )
                     
-                    return {
+                    result = {
                         "text": response.text,
                         "language": response.language,
                         "duration": response.duration,
                         "segments": self.parse_segments(response.segments) if hasattr(response, 'segments') else None
                     }
+                    if attempt > 0:
+                        print(f"[Transcription Service] Retry successful! Transcription completed on attempt {attempt + 1}")
+                    else:
+                        print(f"[Transcription Service] Transcription completed successfully")
+                    return result
                     
             except asyncio.TimeoutError:
                 last_error = "Transcription timeout: File is too large or processing takes too long."
                 if attempt < max_retries - 1:
-                    print(f"Timeout on attempt {attempt + 1}, retrying in {retry_delay} seconds...")
+                    print(f"[Transcription Service] Timeout on attempt {attempt + 1}/{max_retries}, retrying in {retry_delay} seconds...")
                     await asyncio.sleep(retry_delay)
                     continue
+                print(f"[Transcription Service] All retry attempts failed. Giving up.")
                 raise Exception(last_error)
             except Exception as e:
                 error_msg = str(e)
@@ -103,7 +109,7 @@ class TranscriptionService:
                 )
                 
                 if is_retryable and attempt < max_retries - 1:
-                    print(f"Connection error on attempt {attempt + 1}, retrying in {retry_delay} seconds...")
+                    print(f"[Transcription Service] Connection error on attempt {attempt + 1}/{max_retries}: {error_msg[:100]}. Retrying in {retry_delay} seconds...")
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2  
                     continue
@@ -111,13 +117,14 @@ class TranscriptionService:
                 if "invalid" in error_str_lower and "api key" in error_str_lower:
                     raise Exception(f"Invalid API key: Please check your OPENAI_API_KEY in .env file.")
                 
-                # For other errors, raise immediately if last attempt, otherwise continue retry loop
+                # for other errors, raise if last attempt, otherwise continue retry loop
                 if attempt < max_retries - 1:
-                    print(f"Error on attempt {attempt + 1}, retrying in {retry_delay} seconds...")
+                    print(f"[Transcription Service] Error on attempt {attempt + 1}/{max_retries}: {error_msg[:100]}. Retrying in {retry_delay} seconds...")
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2
                     continue
                 
+                print(f"[Transcription Service] All {max_retries} attempts failed. Final error: {error_msg}")
                 raise Exception(f"Transcription failed: {error_msg}")
             
     

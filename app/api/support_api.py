@@ -2,8 +2,8 @@
 RAG-based assistant API endpoints.
 
 A simple assistant that answers questions about meetings using semantic search
-through meeting transcriptions. Uses embeddings for fast and accurate retrieval.
-"""
+through meeting transcriptions"""
+
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -21,7 +21,7 @@ from app.services.search.embedding_service import (
     get_embedding,
     get_embeddings,
     find_most_similar,
-    chunk_text
+    chunk_text as chunk_text_func
 )
 from openai import AsyncOpenAI
 from app.core.config import settings
@@ -39,7 +39,6 @@ class SupportQueryResponse(BaseModel):
     answer: str
     confidence: float = Field(..., ge=0.0, le=1.0)
     sources: List[dict] = Field(default_factory=list)
-    needs_human: bool = False
 
 
 @router.post("/query", response_model=SupportQueryResponse)
@@ -64,26 +63,26 @@ async def query_support_agent(request: SupportQueryRequest,
         return SupportQueryResponse(
             answer="I don't have any completed meeting transcriptions to search through",
             confidence=0.0,
-            sources=[],
+            sources=[]
         )
     
     try:
         return await _semantic_search(request.question, meetings)
     except Exception as e:
         print(f"Semantic search failed: {e}")
-        return _keyword_search(request.question, meetings)
+        return SupportQueryResponse(
+            answer=f"I encountered an error while searching: {str(e)}. Please try again or contact support.",
+            confidence=0.0,
+            sources=[]
+        )
 
 
-async def _get_user_meetings(
-    db: AsyncSession,
-    user_id: int,
-    meeting_ids: Optional[List[int]] = None
-) -> List[Meeting]:
-    """Get user's meetings with transcriptions and cached chunks."""
+async def _get_user_meetings(db: AsyncSession, user_id: int,
+    meeting_ids: Optional[List[int]] = None) -> List[Meeting]:
+    """Get user's meetings with transcriptions and cached chunks"""
     
     query = (
-        select(Meeting)
-        .options(
+        select(Meeting).options(
             selectinload(Meeting.transcription)
             .selectinload(Transcription.chunks)
         ).where(
@@ -115,22 +114,25 @@ async def _semantic_search(question: str, meetings: List[Meeting]) -> SupportQue
     for meeting in meetings:
         transcription = meeting.transcription
         
+        if not transcription:
+            continue
+        
         # Use cached chunks if available
         if transcription.chunks:
             for chunk_record in transcription.chunks:
-                chunk_text = chunk_record.chunk_text
+                chunk_text_value = chunk_record.chunk_text
                 embedding = pickle.loads(chunk_record.embedding)
                 
-                all_chunks.append(chunk_text)
+                all_chunks.append(chunk_text_value)
                 all_embeddings.append(embedding)
                 chunk_info.append({
                     'meeting': meeting,
-                    'text': chunk_text,
+                    'text': chunk_text_value,
                     'index': chunk_record.chunk_index
                 })
         else:
             text = transcription.full_text
-            chunks = chunk_text(text, chunk_size=500, overlap=50)            
+            chunks = chunk_text_func(text, chunk_size=500, overlap=50)            
             embeddings = get_embeddings(chunks)
             
             for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
@@ -144,7 +146,7 @@ async def _semantic_search(question: str, meetings: List[Meeting]) -> SupportQue
         return SupportQueryResponse(
             answer="I don't have any transcriptions to search through.",
             confidence=0.0,
-            sources=[],
+            sources=[]
         )
     
     embeddings_array = np.array(all_embeddings)
@@ -179,8 +181,7 @@ async def _semantic_search(question: str, meetings: List[Meeting]) -> SupportQue
             answer=f"I couldn't find relevant information in your meeting transcriptions to answer: '{question}'. \
             Could you provide more context or check if the information exists in your meetings?",
             confidence=0.1,
-            sources=[],
-            needs_human=True
+            sources=[]
         )
     
     # most relevant meeting
@@ -219,8 +220,7 @@ async def _semantic_search(question: str, meetings: List[Meeting]) -> SupportQue
     return SupportQueryResponse(
         answer=answer,
         confidence=confidence,
-        sources=sources,
-        needs_human=confidence < 0.2
+        sources=sources
     )
 
 
@@ -238,7 +238,7 @@ async def _generate_answer(question: str, context: str, meeting: Meeting) -> str
     """
     
     if not context:
-        if meeting.transcription.summary:
+        if meeting.transcription and meeting.transcription.summary:
             return f"From meeting '{meeting.title}':\n\n{meeting.transcription.summary}"
         else:
             return f"I found a mention in meeting '{meeting.title}', but couldn't extract details."
@@ -250,7 +250,7 @@ async def _generate_answer(question: str, context: str, meeting: Meeting) -> str
 
                             IMPORTANT: 
                             - Answer the question DIRECTLY and CONCISELY
-                            - DO NOT quote the transcription verbatim
+                            - DO NOT quote the transcription 
                             - Extract the key information and present it as a clear answer
                             - If asked "When is X?", answer with the date/time directly
                             - If asked "Who attended?", list the names directly
@@ -289,79 +289,6 @@ async def _generate_answer(question: str, context: str, meeting: Meeting) -> str
         print(f"LLM generation failed: {e}")
         meeting_date = meeting.created_at.strftime('%Y-%m-%d')
         return f"From meeting '{meeting.title}' ({meeting_date}):\n\n{context}"
-
-
-def _keyword_search(question: str, meetings: List[Meeting]) -> SupportQueryResponse:
-    """
-    Simple keyword-based search (fallback when semantic search fails).
-    
-    """
-    
-    question_lower = question.lower()
-    words = set(question_lower.split())
-    
-    results = []
-    
-    for meeting in meetings:
-        text = meeting.transcription.full_text.lower()
-        text_words = set(text.split())
-        
-        # count word intersection
-        common = words.intersection(text_words)
-        
-        if common:
-            score = len(common) / len(words) if words else 0
-            results.append({
-                'meeting': meeting,
-                'score': score
-            })
-    
-    # sort by relevance
-    results.sort(key=lambda x: x['score'], reverse=True)
-    
-    if not results or results[0]['score'] < 0.1:
-        return SupportQueryResponse(
-            answer=f"I couldn't find information for the query: '{question}'.",
-            confidence=0.1,
-            sources=[],
-            needs_human=True
-        )
-    
-    best = results[0]
-    meeting = best['meeting']
-    confidence = min(best['score'] * 2, 1.0)
-    
-    # extract relevant sentences
-    text = meeting.transcription.full_text
-    sentences = [s.strip() for s in text.split('.') if s.strip()]
-    
-    relevant = [
-        s for s in sentences
-        if any(word in s.lower() for word in words)
-    ]
-    
-    context = '. '.join(relevant[:3])
-    
-    if context:
-        date = meeting.created_at.strftime('%Y-%m-%d')
-        answer = f"From meeting '{meeting.title}' ({date}):\n\n{context}"
-    elif meeting.transcription.summary:
-        answer = f"From meeting '{meeting.title}':\n\n{meeting.transcription.summary}"
-    else:
-        answer = f"I found a mention in '{meeting.title}', but couldn't extract details."
-        confidence *= 0.7
-    
-    return SupportQueryResponse(
-        answer=answer,
-        confidence=confidence,
-        sources=[{
-            'meeting_id': meeting.id,
-            'meeting_title': meeting.title,
-            'meeting_date': meeting.created_at.isoformat(),
-            'relevance': best['score']
-        }],
-        needs_human=confidence < 0.3
-    )
 
 
 @router.get("/meetings", response_model=List[dict])
