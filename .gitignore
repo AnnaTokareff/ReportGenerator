@@ -87,11 +87,3 @@ uv.lock
 # OS
 .DS_Store
 Thumbs.db
-
-# Tutorials and guides (not for commit)
-TUTORIAL/
-*_GUIDE.md
-DATABASE_CLEANUP.md
-DOCKER_INSTALL.md
-PIPELINE_GUIDE.md
-QUICK_START_DOCKER.md
