@@ -202,7 +202,6 @@ class MeetingAnalysisService:
     def _build_analysis_prompt(self, transcription_text: str, language: str) -> str:
         """
         Build user prompt for analysis - contains only the transcription text.
-        Structure and rules are in system prompt to avoid duplication.
         """
         lang_names = {
             "en": "English",

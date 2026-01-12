@@ -127,9 +127,9 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50, max_chunks: 
     Split text into chunks for better semantic search.
     
     Args:
-        text: Text to chunk
-        chunk_size: Target characters per chunk
-        overlap: Number of characters to overlap between chunks
+        text: text to chunk
+        chunk_size:  chars per chunk
+        overlap: num of characters to overlap between chunks
         max_chunks: Optional maximum number of chunks to return
         
     Returns:

@@ -4,7 +4,6 @@ Report generation service for meetings in Markdown format
 Uses template-based approach for simpliness
 """
 from typing import Optional
-
 from app.models.meeting_models import Meeting
 
 
