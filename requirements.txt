@@ -183,5 +183,9 @@ sentence-transformers>=2.2.0
     # via fastapi-template (pyproject.toml)
 numpy>=1.24.0
     # via fastapi-template (pyproject.toml)
+langchain-text-splitters>=0.0.1
+    # via fastapi-template (pyproject.toml, for text chunking)
+streamlit>=1.28.0
+    # via fastapi-template (pyproject.toml, for web interface - optional)
 httpx>=0.27.0
     # via fastapi-template (pyproject.toml, for pipeline automation script)

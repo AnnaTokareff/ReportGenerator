@@ -30,7 +30,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     yield
     if sessionmanager._engine is not None:
-        # Close the DB connection
         await sessionmanager.close()
 
 
@@ -44,7 +43,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Set up CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -53,7 +51,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
 app.include_router(health_router, tags=["system"])
 app.include_router(auth_router, prefix="/auth", tags=["authentication"])
 app.include_router(meetings_router, prefix="/meetings", tags=["meetings"])
